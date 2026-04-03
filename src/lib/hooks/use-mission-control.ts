@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 // Hook for Mission Control's own Supabase tables with Realtime
@@ -27,11 +27,12 @@ export function useMCTable<T = Record<string, unknown>>(
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const filterKey = filter ? JSON.stringify(filter) : "";
 
   const fetchData = useCallback(async () => {
     try {
-      let query = supabase.from(table).select(select).limit(limit).order(orderBy, { ascending: orderAsc });
+      let query = supabaseRef.current.from(table).select(select).limit(limit).order(orderBy, { ascending: orderAsc });
 
       if (filter) {
         Object.entries(filter).forEach(([key, value]) => {
@@ -48,7 +49,8 @@ export function useMCTable<T = Record<string, unknown>>(
     } finally {
       setLoading(false);
     }
-  }, [table, select, limit, orderBy, orderAsc, filter, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table, select, limit, orderBy, orderAsc, filterKey]);
 
   useEffect(() => {
     fetchData();
@@ -58,13 +60,13 @@ export function useMCTable<T = Record<string, unknown>>(
   useEffect(() => {
     if (!realtime) return;
 
+    const supabase = supabaseRef.current;
     const channel = supabase
       .channel(`${table}-changes`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table },
         () => {
-          // Refetch on any change
           fetchData();
         }
       )
@@ -73,7 +75,7 @@ export function useMCTable<T = Record<string, unknown>>(
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [table, realtime, supabase, fetchData]);
+  }, [table, realtime, fetchData]);
 
   return { data, loading, error, refetch: fetchData };
 }
