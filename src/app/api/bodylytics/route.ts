@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[bodylytics-proxy] ${rpc || table} failed:`, message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

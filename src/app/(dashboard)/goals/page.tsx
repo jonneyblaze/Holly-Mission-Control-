@@ -19,13 +19,20 @@ interface GoalSnapshot {
   created_at: string;
 }
 
-interface DashboardMetrics {
-  business_goals?: {
-    label: string;
-    actual: number;
-    target: number;
-    unit?: string;
-  }[];
+interface BodylyticsDashboard {
+  current_goals?: {
+    revenue_target?: number;
+    enrollment_target?: number;
+    blog_posts_target?: number;
+    discovery_calls_target?: number;
+    deals_closed_target?: number;
+    linkedin_posts_target?: number;
+    actual_revenue?: number;
+    actual_enrollments?: number;
+    actual_course_sales?: number;
+  };
+  new_enrollments?: number;
+  total_revenue?: number;
 }
 
 // ── Demo / fallback data ───────────────────────────────────────────────────────
@@ -71,10 +78,10 @@ export default function GoalsPage() {
     loading: goalsLoading,
   } = useMCTable<GoalSnapshot>("goal_snapshots", { realtime: true, orderBy: "created_at", orderAsc: false, limit: 1 });
 
-  // Bodylytics: business goals via RPC proxy
+  // Bodylytics: real business metrics via RPC proxy
   const {
-    data: dashboardMetrics,
-  } = useBodylyticsRpc<DashboardMetrics>("get_dashboard_metrics");
+    data: blDashboard,
+  } = useBodylyticsRpc<BodylyticsDashboard>("get_admin_dashboard_v2");
 
   const latestSnapshot = goalSnapshots.length > 0 ? goalSnapshots[0] : null;
 
@@ -91,16 +98,19 @@ export default function GoalsPage() {
           unit: key === "revenue" ? "€" : undefined,
         }));
     }
-    if (dashboardMetrics?.business_goals && dashboardMetrics.business_goals.length > 0) {
-      return dashboardMetrics.business_goals.map((g) => ({
-        label: g.label,
-        actual: g.actual,
-        target: g.target,
-        unit: g.unit,
-      }));
+    if (blDashboard?.current_goals) {
+      const g = blDashboard.current_goals;
+      return [
+        { label: "Revenue", actual: Number(g.actual_revenue ?? blDashboard.total_revenue ?? 0), target: g.revenue_target ?? 35000, unit: "€" },
+        { label: "Enrollments", actual: g.actual_enrollments ?? blDashboard.new_enrollments ?? 0, target: g.enrollment_target ?? 60 },
+        { label: "Blog Posts", actual: 0, target: g.blog_posts_target ?? 12 },
+        { label: "Discovery Calls", actual: 0, target: g.discovery_calls_target ?? 80 },
+        { label: "Deals Closed", actual: 0, target: g.deals_closed_target ?? 30 },
+        { label: "LinkedIn Posts", actual: 0, target: g.linkedin_posts_target ?? 36 },
+      ];
     }
     return DEMO_GOALS;
-  }, [latestSnapshot, dashboardMetrics]);
+  }, [latestSnapshot, blDashboard]);
 
   // Corrective actions from snapshot or demo
   const correctiveActions = useMemo(() => {
