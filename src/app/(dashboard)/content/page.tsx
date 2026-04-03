@@ -1,20 +1,33 @@
 "use client";
 
-import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PenLine, Plus, Eye, Calendar } from "lucide-react";
-import { useMCTable } from "@/lib/hooks/use-mission-control";
+import { useBodylyticsTable } from "@/lib/hooks/use-bodylytics";
+
+// ---------- Types ----------
+
+interface BlogPostRow {
+  id: string;
+  title: string;
+  status: string;
+  slug?: string;
+  excerpt?: string;
+  content?: string;
+  author?: string;
+  created_at: string;
+  published_at?: string;
+}
 
 // ---------- Demo / fallback data ----------
 
-const demoBlogPosts = [
-  { id: "1", title: "5 Body Language Mistakes That Kill Sales Deals", status: "draft", author: "bl-marketing", created: "2026-04-02", wordCount: 1200, seoScore: 92 },
-  { id: "2", title: "Reading Micro-Expressions: A Practical Guide", status: "published", author: "bl-marketing", created: "2026-03-28", wordCount: 1500, seoScore: 88, views: 342 },
-  { id: "3", title: "Non-Verbal Communication in Job Interviews", status: "published", author: "bl-marketing", created: "2026-03-21", wordCount: 1100, seoScore: 85, views: 528 },
-  { id: "4", title: "The Science Behind Deception Detection", status: "draft", author: "bl-marketing", created: "2026-03-15", wordCount: 900, seoScore: 78 },
-  { id: "5", title: "Building Trust Through Body Language", status: "published", author: "bl-marketing", created: "2026-03-10", wordCount: 1300, seoScore: 91, views: 412 },
+const demoBlogPosts: BlogPostRow[] = [
+  { id: "1", title: "5 Body Language Mistakes That Kill Sales Deals", status: "draft", author: "bl-marketing", created_at: "2026-04-02T00:00:00Z" },
+  { id: "2", title: "Reading Micro-Expressions: A Practical Guide", status: "published", author: "bl-marketing", created_at: "2026-03-28T00:00:00Z", published_at: "2026-03-28T00:00:00Z" },
+  { id: "3", title: "Non-Verbal Communication in Job Interviews", status: "published", author: "bl-marketing", created_at: "2026-03-21T00:00:00Z", published_at: "2026-03-21T00:00:00Z" },
+  { id: "4", title: "The Science Behind Deception Detection", status: "draft", author: "bl-marketing", created_at: "2026-03-15T00:00:00Z" },
+  { id: "5", title: "Building Trust Through Body Language", status: "published", author: "bl-marketing", created_at: "2026-03-10T00:00:00Z", published_at: "2026-03-10T00:00:00Z" },
 ];
 
 const contentAudit = [
@@ -30,64 +43,25 @@ const statusColors: Record<string, string> = {
   archived: "bg-slate-100 text-slate-600",
 };
 
-// ---------- Types ----------
-
-interface AgentActivity {
-  id: string;
-  activity_type: string;
-  title?: string;
-  status?: string;
-  agent_name?: string;
-  created_at?: string;
-  metadata?: Record<string, unknown>;
-}
-
-interface BlogPost {
-  id: string;
-  title: string;
-  status: string;
-  author: string;
-  created: string;
-  wordCount: number;
-  seoScore: number;
-  views?: number;
-}
-
 // ---------- Helpers ----------
 
-function activityToBlogPost(a: AgentActivity): BlogPost {
-  const meta = (a.metadata ?? {}) as Record<string, unknown>;
-  return {
-    id: a.id,
-    title: (a.title as string) || "Untitled",
-    status: (a.status as string) || "draft",
-    author: (a.agent_name as string) || "agent",
-    created: a.created_at ? a.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
-    wordCount: (meta.word_count as number) ?? 0,
-    seoScore: (meta.seo_score as number) ?? 0,
-    views: (meta.views as number) ?? undefined,
-  };
+function formatDate(dateStr: string): string {
+  return dateStr.slice(0, 10);
 }
 
 // ---------- Component ----------
 
 export default function ContentPage() {
-  const { data: activities, loading } = useMCTable<AgentActivity>("agent_activity", {
-    orderBy: "created_at",
-    orderAsc: false,
-    limit: 50,
-  });
-
-  // Client-side filter for content-related activity types
-  const contentActivities = useMemo(
-    () => activities.filter((a) => a.activity_type === "content" || a.activity_type === "report"),
-    [activities]
+  const { data, loading, error } = useBodylyticsTable<BlogPostRow>(
+    "blog_posts",
+    "*",
+    50,
+    { refreshInterval: 60_000 }
   );
 
-  const livePosts = useMemo(() => contentActivities.map(activityToBlogPost), [contentActivities]);
-
   // Use live data when available, otherwise fall back to demo data
-  const blogPosts = livePosts.length > 0 ? livePosts : demoBlogPosts;
+  const blogPosts = data && data.length > 0 ? data : demoBlogPosts;
+  const isDemo = !data || data.length === 0;
 
   return (
     <div className="space-y-6 max-w-[1400px]">
@@ -95,9 +69,14 @@ export default function ContentPage() {
         <div>
           <h1 className="text-2xl font-montserrat font-bold text-navy-500">Content Pipeline</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {loading ? "Loading..." : (
+            {loading ? "Loading blog posts..." : error ? (
+              <span className="text-red-500">Error: {error}</span>
+            ) : (
               <>
                 {blogPosts.length} posts &middot; {blogPosts.filter(p => p.status === "draft").length} drafts awaiting review
+                {isDemo && (
+                  <span className="ml-2 text-amber-500 text-xs">(demo data)</span>
+                )}
               </>
             )}
           </p>
@@ -115,10 +94,9 @@ export default function ContentPage() {
             <tr className="border-b bg-muted/50">
               <th className="text-left text-xs font-semibold text-muted-foreground p-3">Title</th>
               <th className="text-left text-xs font-semibold text-muted-foreground p-3">Status</th>
-              <th className="text-left text-xs font-semibold text-muted-foreground p-3">Date</th>
-              <th className="text-right text-xs font-semibold text-muted-foreground p-3">Words</th>
-              <th className="text-right text-xs font-semibold text-muted-foreground p-3">SEO</th>
-              <th className="text-right text-xs font-semibold text-muted-foreground p-3">Views</th>
+              <th className="text-left text-xs font-semibold text-muted-foreground p-3">Author</th>
+              <th className="text-left text-xs font-semibold text-muted-foreground p-3">Created</th>
+              <th className="text-left text-xs font-semibold text-muted-foreground p-3">Published</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -127,32 +105,36 @@ export default function ContentPage() {
                 <td className="p-3">
                   <div className="flex items-center gap-2">
                     <PenLine className="w-4 h-4 text-navy-400 flex-shrink-0" />
-                    <span className="text-sm font-medium text-navy-500">{post.title}</span>
+                    <div className="min-w-0">
+                      <span className="text-sm font-medium text-navy-500 block truncate">{post.title}</span>
+                      {post.excerpt && (
+                        <span className="text-xs text-muted-foreground block truncate max-w-md">{post.excerpt}</span>
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td className="p-3">
-                  <Badge className={cn("text-[10px]", statusColors[post.status])}>{post.status}</Badge>
+                  <Badge className={cn("text-[10px]", statusColors[post.status] ?? statusColors.draft)}>
+                    {post.status}
+                  </Badge>
+                </td>
+                <td className="p-3 text-sm text-muted-foreground">
+                  {post.author ?? "unknown"}
                 </td>
                 <td className="p-3">
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Calendar className="w-3 h-3" />
-                    {post.created}
+                    {formatDate(post.created_at)}
                   </div>
                 </td>
-                <td className="p-3 text-right text-sm text-muted-foreground">{post.wordCount.toLocaleString()}</td>
-                <td className="p-3 text-right">
-                  <span className={cn("text-sm font-medium", post.seoScore >= 90 ? "text-emerald-600" : post.seoScore >= 80 ? "text-amber-600" : "text-red-600")}>
-                    {post.seoScore}
-                  </span>
-                </td>
-                <td className="p-3 text-right">
-                  {post.views ? (
-                    <div className="flex items-center justify-end gap-1 text-sm text-muted-foreground">
+                <td className="p-3">
+                  {post.published_at ? (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <Eye className="w-3 h-3" />
-                      {post.views}
+                      {formatDate(post.published_at)}
                     </div>
                   ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
+                    <span className="text-xs text-muted-foreground">--</span>
                   )}
                 </td>
               </tr>

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { BookOpen, AlertCircle, CheckCircle2, Clock, Bot } from "lucide-react";
 import { useMCTable } from "@/lib/hooks/use-mission-control";
+import { useBodylyticsTable } from "@/lib/hooks/use-bodylytics";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,17 +18,15 @@ interface KBGapRow {
   created_at: string;
 }
 
-interface AgentActivityRow {
+interface SupportTicketRow {
   id: string;
-  activity_type: string;
-  agent_name?: string;
-  subject?: string;
-  status?: string;
-  priority?: string;
-  student?: string;
-  auto_replied?: boolean;
-  metadata?: Record<string, unknown>;
+  subject: string;
+  status: string; // open | closed | escalated
   created_at: string;
+  student_name?: string | null;
+  response?: string | null;
+  responded_by?: string | null;
+  response_time?: string | null;
 }
 
 // ── Demo / fallback data ─────────────────────────────────────────────────────
@@ -46,8 +45,6 @@ const demoKBGaps = [
   { topic: "Course enrollment process", occurrences: 3, status: "published" },
   { topic: "Referral code usage", occurrences: 2, status: "identified" },
 ];
-
-const SUPPORT_ACTIVITY_TYPES = ["ticket", "support", "kb_article"];
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -79,43 +76,42 @@ function timeAgo(dateStr: string): string {
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SupportPage() {
-  // Live data from Supabase
+  // Live ticket data from BodyLytics via proxy
+  const {
+    data: liveTicketRows,
+    loading: ticketsLoading,
+  } = useBodylyticsTable<SupportTicketRow>(
+    "support_tickets",
+    "*",
+    50,
+    { refreshInterval: 30_000 }
+  );
+
+  // KB gaps from Mission Control's own Supabase
   const { data: liveKBGaps, loading: kbLoading } = useMCTable<KBGapRow>("kb_gaps", {
     realtime: true,
     orderBy: "occurrence_count",
     orderAsc: false,
   });
 
-  const { data: liveActivity, loading: activityLoading } = useMCTable<AgentActivityRow>("agent_activity", {
-    realtime: true,
-    limit: 50,
-    orderBy: "created_at",
-    orderAsc: false,
-  });
-
-  // Filter agent_activity for support-related entries
-  const supportActivity = useMemo(
-    () => liveActivity.filter((a) => SUPPORT_ACTIVITY_TYPES.includes(a.activity_type)),
-    [liveActivity]
-  );
-
-  // Map live activity rows into the same shape as demoTickets
+  // Map live BodyLytics rows into display shape
   const liveTickets = useMemo(
     () =>
-      supportActivity.map((a, i) => ({
-        id: a.id?.slice(-4) ?? String(i),
-        subject: a.subject ?? a.activity_type,
-        status: a.status ?? "open",
-        priority: a.priority ?? "medium",
-        student: a.student ?? "Unknown",
-        created: a.created_at ? timeAgo(a.created_at) : "—",
-        repliedBy: a.agent_name ?? null,
-        autoReplied: a.auto_replied ?? false,
+      (liveTicketRows ?? []).map((t) => ({
+        id: String(t.id),
+        subject: t.subject,
+        status: t.status,
+        priority: t.status === "escalated" ? "high" : "medium",
+        student: t.student_name ?? "Unknown",
+        created: t.created_at ? timeAgo(t.created_at) : "\u2014",
+        repliedBy: t.responded_by ?? null,
+        autoReplied: !!t.responded_by && t.responded_by !== "sean",
+        responseTime: t.response_time ?? null,
       })),
-    [supportActivity]
+    [liveTicketRows]
   );
 
-  // Decide which data to display — live wins when rows exist
+  // Decide which data to display -- live wins when rows exist
   const tickets = liveTickets.length > 0 ? liveTickets : demoTickets;
 
   const kbGaps =
@@ -133,7 +129,7 @@ export default function SupportPage() {
   const autoRepliedCount = tickets.filter((t) => t.autoReplied).length;
   const escalatedCount = tickets.filter((t) => t.status === "escalated").length;
 
-  const isLoading = kbLoading || activityLoading;
+  const isLoading = kbLoading || ticketsLoading;
 
   return (
     <div className="space-y-6 max-w-[1400px]">

@@ -3,172 +3,174 @@
 import { useMemo } from "react";
 import MetricCard from "@/components/dashboard/MetricCard";
 import GoalGauge from "@/components/dashboard/GoalGauge";
-import { useMCTable } from "@/lib/hooks/use-mission-control";
-import { DollarSign, TrendingUp, Users, ShoppingCart } from "lucide-react";
+import { useBodylyticsRpc } from "@/lib/hooks/use-bodylytics";
+import { DollarSign, TrendingUp, Users, Target, AlertCircle, RefreshCw } from "lucide-react";
 
 // ---------- Types ----------
-interface GoalSnapshot {
-  id: string;
-  snapshot_date: string;
-  period_type: string;
-  metrics: {
-    revenue_mtd?: number;
-    revenue_target?: number;
-    projected_mrr?: number;
-    avg_deal_value?: number;
-    closed_deals?: number;
-    revenue_per_student?: number;
-    active_students?: number;
-    revenue_trend?: string;
-    mrr_trend?: string;
-    deal_trend?: string;
-    student_trend?: string;
-    daily_run_rate?: number;
-    days_remaining?: number;
-    month_end_forecast?: number;
-    forecast_vs_target_pct?: number;
-    pipeline?: {
-      stage: string;
-      value: number;
-      count: number;
-    }[];
-  };
-  alerts: unknown[];
-  corrective_actions: unknown[];
-  created_at: string;
+interface TopCourse {
+  course_id: string;
+  title: string;
+  total_enrolled: number;
+  stripe_revenue: number;
+  invoice_revenue: number;
+}
+
+interface EnrollmentTrendPoint {
+  day: string;
+  date: string;
+  enrollments: number;
+  stripe_revenue: number;
+}
+
+interface RevenueTrendPoint {
+  week_start: string;
+  label: string;
+  stripe_revenue: number;
+  invoice_revenue: number;
+}
+
+interface CurrentGoals {
+  revenue_target: number;
+  enrollment_target: number;
+  actual_revenue: number;
+  actual_enrollments: number;
+}
+
+interface DashboardData {
+  total_revenue: number;
+  stripe_revenue: number;
+  invoice_revenue: number;
+  monthly_costs: number;
+  net_profit: number;
+  total_students: number;
+  new_enrollments: number;
+  paid_enrollments: number;
+  top_courses: TopCourse[];
+  enrollment_trend: EnrollmentTrendPoint[];
+  revenue_trend: RevenueTrendPoint[];
+  current_goals: CurrentGoals;
 }
 
 // ---------- Demo / fallback data ----------
-const DEMO_METRICS = {
-  revenue_mtd: 2340,
-  revenue_target: 5000,
-  projected_mrr: 3800,
-  avg_deal_value: 1600,
-  closed_deals: 2,
-  revenue_per_student: 49.78,
-  active_students: 47,
-  revenue_trend: "+12%",
-  mrr_trend: "+8%",
-  deal_trend: "stable",
-  student_trend: "+3%",
-  daily_run_rate: 78,
-  days_remaining: 12,
-  month_end_forecast: 3276,
-  forecast_vs_target_pct: -34.5,
+const DEMO: DashboardData = {
+  total_revenue: 0,
+  stripe_revenue: 0,
+  invoice_revenue: 0,
+  monthly_costs: 15,
+  net_profit: -15,
+  total_students: 0,
+  new_enrollments: 0,
+  paid_enrollments: 0,
+  top_courses: [],
+  enrollment_trend: [],
+  revenue_trend: [],
+  current_goals: {
+    revenue_target: 35000,
+    enrollment_target: 60,
+    actual_revenue: 0,
+    actual_enrollments: 0,
+  },
 };
 
-const DEMO_PIPELINE = [
-  { stage: "Lead", value: 0, count: 45 },
-  { stage: "Prospect", value: 12600, count: 18 },
-  { stage: "Proposal", value: 9800, count: 7 },
-  { stage: "Negotiation", value: 5400, count: 3 },
-  { stage: "Won", value: 3200, count: 2 },
-  { stage: "Lost", value: 1800, count: 4 },
-];
-
-// ---------- Helpers ----------
-function trendDirection(val: string | undefined): "up" | "down" | "flat" {
-  if (!val) return "flat";
-  if (val.startsWith("+")) return "up";
-  if (val.startsWith("-")) return "down";
-  return "flat";
-}
-
 export default function FinancePage() {
-  // Fetch the latest goal snapshot (ordered by snapshot_date desc, limit 1)
-  const { data: snapshots } = useMCTable<GoalSnapshot>("goal_snapshots", {
-    orderBy: "snapshot_date",
-    orderAsc: false,
-    limit: 1,
-  });
+  const { data, loading, error, refetch } = useBodylyticsRpc<DashboardData>(
+    "get_admin_dashboard_v2",
+    { refreshInterval: 60_000 }
+  );
 
-  const latest = snapshots.length > 0 ? snapshots[0] : null;
+  // Use live data, fall back to demo only on error
+  const d = useMemo(() => {
+    if (error || !data) return DEMO;
+    return data;
+  }, [data, error]);
 
-  // Derive metrics: live snapshot wins, otherwise fall back to demo
-  const m = useMemo(() => {
-    if (!latest?.metrics) return DEMO_METRICS;
-    const lm = latest.metrics;
-    return {
-      revenue_mtd: lm.revenue_mtd ?? DEMO_METRICS.revenue_mtd,
-      revenue_target: lm.revenue_target ?? DEMO_METRICS.revenue_target,
-      projected_mrr: lm.projected_mrr ?? DEMO_METRICS.projected_mrr,
-      avg_deal_value: lm.avg_deal_value ?? DEMO_METRICS.avg_deal_value,
-      closed_deals: lm.closed_deals ?? DEMO_METRICS.closed_deals,
-      revenue_per_student: lm.revenue_per_student ?? DEMO_METRICS.revenue_per_student,
-      active_students: lm.active_students ?? DEMO_METRICS.active_students,
-      revenue_trend: lm.revenue_trend ?? DEMO_METRICS.revenue_trend,
-      mrr_trend: lm.mrr_trend ?? DEMO_METRICS.mrr_trend,
-      deal_trend: lm.deal_trend ?? DEMO_METRICS.deal_trend,
-      student_trend: lm.student_trend ?? DEMO_METRICS.student_trend,
-      daily_run_rate: lm.daily_run_rate ?? DEMO_METRICS.daily_run_rate,
-      days_remaining: lm.days_remaining ?? DEMO_METRICS.days_remaining,
-      month_end_forecast: lm.month_end_forecast ?? DEMO_METRICS.month_end_forecast,
-      forecast_vs_target_pct: lm.forecast_vs_target_pct ?? DEMO_METRICS.forecast_vs_target_pct,
-    };
-  }, [latest]);
-
-  const dealPipeline = useMemo(() => {
-    if (latest?.metrics?.pipeline && latest.metrics.pipeline.length > 0) {
-      return latest.metrics.pipeline;
-    }
-    return DEMO_PIPELINE;
-  }, [latest]);
-
-  const totalPipeline = dealPipeline.reduce((sum, d) => sum + d.value, 0);
+  const isLive = !!data && !error;
 
   const financialMetrics = [
     {
-      title: "Revenue (MTD)",
-      value: `\u20AC${m.revenue_mtd.toLocaleString()}`,
-      subtitle: `Target: \u20AC${m.revenue_target.toLocaleString()}`,
+      title: "Total Revenue",
+      value: `\u20AC${d.total_revenue.toLocaleString()}`,
+      subtitle: `Stripe: \u20AC${d.stripe_revenue.toLocaleString()} | Invoice: \u20AC${d.invoice_revenue.toLocaleString()}`,
       icon: DollarSign,
-      trend: trendDirection(m.revenue_trend),
-      trendValue: m.revenue_trend,
       accentColor: "teal" as const,
     },
     {
-      title: "Projected MRR",
-      value: `\u20AC${m.projected_mrr.toLocaleString()}`,
-      subtitle: "Based on current pace",
+      title: "Monthly Costs",
+      value: `\u20AC${d.monthly_costs.toLocaleString()}`,
+      subtitle: "Hosting, services, subscriptions",
       icon: TrendingUp,
-      trend: trendDirection(m.mrr_trend),
-      trendValue: m.mrr_trend,
-      accentColor: "navy" as const,
-    },
-    {
-      title: "Avg Deal Value",
-      value: `\u20AC${m.avg_deal_value.toLocaleString()}`,
-      subtitle: `From ${m.closed_deals} closed deals`,
-      icon: ShoppingCart,
-      trend: trendDirection(m.deal_trend),
-      trendValue: m.deal_trend,
       accentColor: "copper" as const,
     },
     {
-      title: "Revenue per Student",
-      value: `\u20AC${m.revenue_per_student.toLocaleString()}`,
-      subtitle: `${m.active_students} active students`,
+      title: "Net Profit",
+      value: `\u20AC${d.net_profit.toLocaleString()}`,
+      subtitle: d.net_profit >= 0 ? "In the green" : "Pre-launch investment phase",
+      icon: Target,
+      trend: d.net_profit >= 0 ? ("up" as const) : ("down" as const),
+      trendValue: d.net_profit >= 0 ? "Profitable" : "Pre-revenue",
+      accentColor: "navy" as const,
+    },
+    {
+      title: "Total Students",
+      value: d.total_students.toLocaleString(),
+      subtitle: `${d.new_enrollments} enrollments (${d.paid_enrollments} paid)`,
       icon: Users,
-      trend: trendDirection(m.student_trend),
-      trendValue: m.student_trend,
       accentColor: "teal" as const,
     },
   ];
 
-  const forecastPct = m.forecast_vs_target_pct;
-  const forecastPctLabel =
-    forecastPct >= 0
-      ? `(+${forecastPct}% vs target)`
-      : `(${forecastPct}% vs target)`;
+  // Enrollment trend: last 7 points
+  const recentEnrollments = d.enrollment_trend.slice(-7);
+  const totalRecentEnrollments = recentEnrollments.reduce(
+    (sum, p) => sum + p.enrollments,
+    0
+  );
+
+  // Revenue trend: last 4 weeks
+  const recentRevenue = d.revenue_trend.slice(-4);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <RefreshCw className="w-5 h-5 animate-spin" />
+          <span className="text-sm font-medium">Loading financial data...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-[1400px]">
-      <div>
-        <h1 className="text-2xl font-montserrat font-bold text-navy-500">Financial Health</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          April 2026 &middot; &euro;{totalPipeline.toLocaleString()} total pipeline
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-montserrat font-bold text-navy-500">
+            Financial Health
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            BodyLytics &middot; Live from Supabase
+            {!isLive && (
+              <span className="ml-2 text-amber-600 font-medium">
+                (showing fallback data)
+              </span>
+            )}
+          </p>
+        </div>
+        <button
+          onClick={() => refetch()}
+          className="text-xs text-muted-foreground hover:text-navy-500 flex items-center gap-1 transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Refresh
+        </button>
       </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2 text-sm text-red-700">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>Could not fetch live data: {error}. Showing fallback values.</span>
+        </div>
+      )}
 
       {/* Key Financials */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -177,49 +179,136 @@ export default function FinancePage() {
         ))}
       </div>
 
-      {/* Revenue Gauge */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="flex justify-center">
-          <GoalGauge label="Monthly Revenue" actual={m.revenue_mtd} target={m.revenue_target} unit={"\u20AC"} />
-        </div>
-        <div className="lg:col-span-2">
-          <h2 className="text-lg font-montserrat font-semibold text-navy-500 mb-3">Deal Pipeline</h2>
-          <div className="bg-white rounded-xl border border-border p-5 space-y-3">
-            {dealPipeline.map((d) => (
-              <div key={d.stage} className="flex items-center gap-4">
-                <span className="text-sm font-medium text-navy-500 w-24">{d.stage}</span>
-                <div className="flex-1 h-8 bg-muted rounded-lg overflow-hidden relative">
-                  <div
-                    className="h-full bg-teal-500/70 rounded-lg transition-all duration-500 flex items-center px-3"
-                    style={{ width: `${totalPipeline > 0 ? Math.max((d.value / totalPipeline) * 100, 5) : 5}%` }}
-                  >
-                    <span className="text-[10px] font-bold text-white whitespace-nowrap">
-                      &euro;{d.value.toLocaleString()}
+      {/* Goal Gauges */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <GoalGauge
+          label="Revenue vs Target"
+          actual={d.current_goals.actual_revenue}
+          target={d.current_goals.revenue_target}
+          unit={"\u20AC"}
+        />
+        <GoalGauge
+          label="Enrollments vs Target"
+          actual={d.current_goals.actual_enrollments}
+          target={d.current_goals.enrollment_target}
+        />
+        <div className="lg:col-span-2 bg-white rounded-xl border border-border p-5">
+          <h2 className="text-lg font-montserrat font-semibold text-navy-500 mb-3">
+            Top Courses
+          </h2>
+          {d.top_courses.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No course data yet. Courses will appear here once students enrol.
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {d.top_courses.slice(0, 5).map((course) => (
+                <div
+                  key={course.course_id}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <span className="text-navy-500 font-medium truncate max-w-[60%]">
+                    {course.title}
+                  </span>
+                  <div className="flex items-center gap-3 text-muted-foreground text-xs">
+                    <span>{course.total_enrolled} students</span>
+                    <span className="font-medium text-teal-600">
+                      &euro;{(course.stripe_revenue + course.invoice_revenue).toLocaleString()}
                     </span>
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground w-16 text-right">{d.count} deals</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Forecast */}
+      {/* Enrollment Trend */}
       <div className="bg-white rounded-xl border border-border p-6">
-        <h2 className="text-lg font-montserrat font-semibold text-navy-500 mb-2">Month-End Forecast</h2>
+        <h2 className="text-lg font-montserrat font-semibold text-navy-500 mb-2">
+          Enrollment Trend (Last 7 Days)
+        </h2>
         <p className="text-sm text-muted-foreground mb-4">
-          Based on current daily run rate of &euro;{m.daily_run_rate}/day with {m.days_remaining} days remaining
+          {totalRecentEnrollments} total enrollments in the last 7 days
         </p>
-        <div className="flex items-baseline gap-4">
-          <span className="text-3xl font-montserrat font-bold text-copper-500">
-            &euro;{m.month_end_forecast.toLocaleString()}
-          </span>
-          <span className="text-sm text-muted-foreground">projected</span>
-          <span className={`text-sm font-medium ${forecastPct >= 0 ? "text-green-500" : "text-red-500"}`}>
-            {forecastPctLabel}
-          </span>
-        </div>
+        {recentEnrollments.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No enrollment data available yet.
+          </p>
+        ) : (
+          <div className="flex items-end gap-2 h-32">
+            {recentEnrollments.map((point) => {
+              const maxEnroll = Math.max(
+                ...recentEnrollments.map((p) => p.enrollments),
+                1
+              );
+              const heightPct = (point.enrollments / maxEnroll) * 100;
+              return (
+                <div
+                  key={point.day}
+                  className="flex-1 flex flex-col items-center gap-1"
+                >
+                  <span className="text-[10px] text-muted-foreground font-medium">
+                    {point.enrollments}
+                  </span>
+                  <div
+                    className="w-full bg-teal-500/70 rounded-t-md transition-all duration-500"
+                    style={{
+                      height: `${Math.max(heightPct, 4)}%`,
+                    }}
+                  />
+                  <span className="text-[10px] text-muted-foreground">
+                    {point.date}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Weekly Revenue Trend */}
+      <div className="bg-white rounded-xl border border-border p-6">
+        <h2 className="text-lg font-montserrat font-semibold text-navy-500 mb-2">
+          Weekly Revenue Trend
+        </h2>
+        {recentRevenue.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No revenue data available yet.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {recentRevenue.map((week) => {
+              const weekTotal = week.stripe_revenue + week.invoice_revenue;
+              const maxWeekly = Math.max(
+                ...recentRevenue.map(
+                  (w) => w.stripe_revenue + w.invoice_revenue
+                ),
+                1
+              );
+              const widthPct = (weekTotal / maxWeekly) * 100;
+              return (
+                <div key={week.week_start} className="flex items-center gap-4">
+                  <span className="text-sm font-medium text-navy-500 w-20">
+                    {week.label}
+                  </span>
+                  <div className="flex-1 h-8 bg-muted rounded-lg overflow-hidden relative">
+                    <div
+                      className="h-full bg-teal-500/70 rounded-lg transition-all duration-500 flex items-center px-3"
+                      style={{
+                        width: `${Math.max(widthPct, 5)}%`,
+                      }}
+                    >
+                      <span className="text-[10px] font-bold text-white whitespace-nowrap">
+                        &euro;{weekTotal.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
