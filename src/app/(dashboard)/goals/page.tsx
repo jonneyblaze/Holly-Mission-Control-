@@ -1,11 +1,46 @@
 "use client";
 
+import { useMemo } from "react";
 import GoalGauge from "@/components/dashboard/GoalGauge";
 import { Badge } from "@/components/ui/badge";
-import { Bot, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
+import { Bot, CheckCircle2, Clock, AlertTriangle, Loader2 } from "lucide-react";
+import { useMCTable } from "@/lib/hooks/use-mission-control";
+import { useBodylyticsRpc } from "@/lib/hooks/use-bodylytics";
 
-const goals = [
-  { label: "Revenue", actual: 2340, target: 5000, unit: "\u20AC" },
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+interface GoalSnapshot {
+  id: string;
+  label: string;
+  actual: number;
+  target: number;
+  unit?: string;
+  created_at: string;
+}
+
+interface CorrectiveAction {
+  id: string;
+  kpi: string;
+  action: string;
+  agent: string;
+  status: string;
+  triggeredAt: string;
+  triggered_at?: string;
+}
+
+interface DashboardMetrics {
+  business_goals?: {
+    label: string;
+    actual: number;
+    target: number;
+    unit?: string;
+  }[];
+}
+
+// ── Demo / fallback data ───────────────────────────────────────────────────────
+
+const DEMO_GOALS = [
+  { label: "Revenue", actual: 2340, target: 5000, unit: "€" },
   { label: "Enrollments", actual: 12, target: 20 },
   { label: "Blog Posts", actual: 3, target: 8 },
   { label: "Discovery Calls", actual: 2, target: 6 },
@@ -15,7 +50,7 @@ const goals = [
   { label: "Proposals Sent", actual: 4, target: 8 },
 ];
 
-const correctiveActions = [
+const DEMO_CORRECTIVE_ACTIONS: CorrectiveAction[] = [
   {
     id: "1",
     kpi: "Revenue",
@@ -56,7 +91,60 @@ const statusConfig = {
   done: { icon: CheckCircle2, color: "bg-emerald-100 text-emerald-700", label: "Done" },
 };
 
+// ── Page ───────────────────────────────────────────────────────────────────────
+
 export default function GoalsPage() {
+  // Mission Control: goal_snapshots with realtime
+  const {
+    data: goalSnapshots,
+    loading: goalsLoading,
+  } = useMCTable<GoalSnapshot>("goal_snapshots", { realtime: true, orderBy: "created_at", orderAsc: false });
+
+  // Mission Control: corrective_actions with realtime
+  const {
+    data: liveActions,
+    loading: actionsLoading,
+  } = useMCTable<CorrectiveAction>("corrective_actions", { realtime: true, orderBy: "created_at", orderAsc: false });
+
+  // Bodylytics: business goals via RPC proxy
+  const {
+    data: dashboardMetrics,
+  } = useBodylyticsRpc<DashboardMetrics>("get_dashboard_metrics");
+
+  // Merge: live goal_snapshots > bodylytics business_goals > demo fallback
+  const goals = useMemo(() => {
+    if (goalSnapshots && goalSnapshots.length > 0) {
+      return goalSnapshots.map((s) => ({
+        label: s.label,
+        actual: s.actual,
+        target: s.target,
+        unit: s.unit,
+      }));
+    }
+    if (dashboardMetrics?.business_goals && dashboardMetrics.business_goals.length > 0) {
+      return dashboardMetrics.business_goals.map((g) => ({
+        label: g.label,
+        actual: g.actual,
+        target: g.target,
+        unit: g.unit,
+      }));
+    }
+    return DEMO_GOALS;
+  }, [goalSnapshots, dashboardMetrics]);
+
+  // Merge: live corrective_actions > demo fallback
+  const correctiveActions = useMemo(() => {
+    if (liveActions && liveActions.length > 0) {
+      return liveActions.map((a) => ({
+        ...a,
+        triggeredAt: a.triggered_at ?? a.triggeredAt,
+      }));
+    }
+    return DEMO_CORRECTIVE_ACTIONS;
+  }, [liveActions]);
+
+  const isLoading = goalsLoading || actionsLoading;
+
   return (
     <div className="space-y-6 max-w-[1400px]">
       <div>
@@ -67,11 +155,17 @@ export default function GoalsPage() {
       </div>
 
       {/* Goal Gauges Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {goals.map((g) => (
-          <GoalGauge key={g.label} {...g} />
-        ))}
-      </div>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {goals.map((g) => (
+            <GoalGauge key={g.label} {...g} />
+          ))}
+        </div>
+      )}
 
       {/* Corrective Actions */}
       <div className="space-y-3">
@@ -84,7 +178,9 @@ export default function GoalsPage() {
         <div className="bg-white rounded-xl border border-border divide-y divide-border">
           {correctiveActions.map((action) => {
             const config = statusConfig[action.status as keyof typeof statusConfig];
-            const StatusIcon = config.icon;
+            const StatusIcon = config?.icon ?? Clock;
+            const statusColor = config?.color ?? "bg-gray-100 text-gray-700";
+            const statusLabel = config?.label ?? action.status;
             return (
               <div key={action.id} className="flex items-center gap-4 p-4">
                 <div className="flex-1 min-w-0">
@@ -96,9 +192,9 @@ export default function GoalsPage() {
                   </div>
                   <p className="text-sm font-medium text-navy-500 truncate">{action.action}</p>
                 </div>
-                <Badge className={`${config.color} text-[10px] gap-1`}>
+                <Badge className={`${statusColor} text-[10px] gap-1`}>
                   <StatusIcon className="w-3 h-3" />
-                  {config.label}
+                  {statusLabel}
                 </Badge>
               </div>
             );

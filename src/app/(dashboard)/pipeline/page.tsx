@@ -3,8 +3,40 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Users, ArrowRight } from "lucide-react";
+import { useMCTable } from "@/lib/hooks/use-mission-control";
+import { useMemo } from "react";
 
-const funnelStages = [
+// ---------- Types ----------
+interface LeadSnapshot {
+  id: string;
+  snapshot_date: string;
+  total_leads: number;
+  by_status: Record<string, number>;
+  by_source: Record<string, number>;
+  deals_pipeline: Record<string, { count: number; value: number }>;
+  total_pipeline_value: number;
+  created_at: string;
+}
+
+interface FunnelStage {
+  stage: string;
+  count: number;
+  value: string;
+  color: string;
+}
+
+interface Lead {
+  id: string;
+  name: string;
+  company: string;
+  source: string;
+  temperature: string;
+  lastInteraction: string;
+  score: number;
+}
+
+// ---------- Demo / fallback data ----------
+const DEMO_FUNNEL: FunnelStage[] = [
   { stage: "Lead", count: 45, value: "\u20AC0", color: "bg-slate-200" },
   { stage: "Prospect", count: 18, value: "\u20AC12,600", color: "bg-navy-200" },
   { stage: "Proposal", count: 7, value: "\u20AC9,800", color: "bg-teal-300" },
@@ -12,13 +44,23 @@ const funnelStages = [
   { stage: "Won", count: 2, value: "\u20AC3,200", color: "bg-emerald-500" },
 ];
 
-const leads = [
+const DEMO_LEADS: Lead[] = [
   { id: "1", name: "Sarah Chen", company: "Accenture L&D", source: "outbound", temperature: "hot", lastInteraction: "Called yesterday", score: 85 },
   { id: "2", name: "Marcus Weber", company: "SalesForce EU", source: "inbound", temperature: "warm", lastInteraction: "Downloaded whitepaper", score: 65 },
   { id: "3", name: "Ana Rodrigues", company: "IESE Business School", source: "outbound", temperature: "warm", lastInteraction: "LinkedIn connection accepted", score: 55 },
   { id: "4", name: "James Thornton", company: "Deloitte", source: "referral", temperature: "cold", lastInteraction: "No reply (14d)", score: 20 },
   { id: "5", name: "Elena Popova", company: "Booking.com", source: "inbound", temperature: "hot", lastInteraction: "Requested demo", score: 90 },
 ];
+
+const STAGE_COLORS: Record<string, string> = {
+  lead: "bg-slate-200",
+  prospect: "bg-navy-200",
+  proposal: "bg-teal-300",
+  negotiation: "bg-teal-500",
+  won: "bg-emerald-500",
+};
+
+const STAGE_ORDER = ["lead", "prospect", "proposal", "negotiation", "won"];
 
 const tempColors: Record<string, string> = {
   hot: "bg-red-100 text-red-700",
@@ -32,13 +74,60 @@ const sourceColors: Record<string, string> = {
   referral: "bg-copper-100 text-copper-700",
 };
 
+// ---------- Helpers ----------
+function formatEuro(value: number): string {
+  if (value === 0) return "\u20AC0";
+  return "\u20AC" + value.toLocaleString("en-IE");
+}
+
+function buildFunnelFromSnapshot(snapshot: LeadSnapshot): FunnelStage[] {
+  const pipeline = snapshot.deals_pipeline;
+  if (!pipeline || Object.keys(pipeline).length === 0) return DEMO_FUNNEL;
+
+  return STAGE_ORDER.map((key) => {
+    const stage = pipeline[key] || { count: 0, value: 0 };
+    return {
+      stage: key.charAt(0).toUpperCase() + key.slice(1),
+      count: stage.count,
+      value: formatEuro(stage.value),
+      color: STAGE_COLORS[key] || "bg-slate-200",
+    };
+  });
+}
+
+// ---------- Component ----------
 export default function PipelinePage() {
+  const { data: snapshots, loading } = useMCTable<LeadSnapshot>("lead_snapshots", {
+    orderBy: "created_at",
+    orderAsc: false,
+    limit: 1,
+    realtime: true,
+  });
+
+  const latestSnapshot = snapshots.length > 0 ? snapshots[0] : null;
+
+  const funnelStages = useMemo<FunnelStage[]>(() => {
+    if (!latestSnapshot) return DEMO_FUNNEL;
+    return buildFunnelFromSnapshot(latestSnapshot);
+  }, [latestSnapshot]);
+
+  const totalPipelineValue = latestSnapshot
+    ? formatEuro(Number(latestSnapshot.total_pipeline_value))
+    : "\u20AC31,000";
+
+  const totalLeads = latestSnapshot
+    ? latestSnapshot.total_leads
+    : 45;
+
+  const leads = DEMO_LEADS;
+
   return (
     <div className="space-y-6 max-w-[1400px]">
       <div>
         <h1 className="text-2xl font-montserrat font-bold text-navy-500">Sales Pipeline</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          \u20AC31,000 total pipeline value &middot; 45 active leads
+          {totalPipelineValue} total pipeline value &middot; {totalLeads} active leads
+          {loading && " (loading\u2026)"}
         </p>
       </div>
 
@@ -60,7 +149,9 @@ export default function PipelinePage() {
                 {i < funnelStages.length - 1 && (
                   <div className="text-center mt-1">
                     <span className="text-[10px] text-muted-foreground">
-                      {Math.round((funnelStages[i + 1].count / stage.count) * 100)}%
+                      {stage.count > 0
+                        ? Math.round((funnelStages[i + 1].count / stage.count) * 100)
+                        : 0}%
                     </span>
                   </div>
                 )}

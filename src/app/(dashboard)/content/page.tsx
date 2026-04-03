@@ -1,11 +1,15 @@
 "use client";
 
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PenLine, Plus, Eye, Calendar } from "lucide-react";
+import { useMCTable } from "@/lib/hooks/use-mission-control";
 
-const blogPosts = [
+// ---------- Demo / fallback data ----------
+
+const demoBlogPosts = [
   { id: "1", title: "5 Body Language Mistakes That Kill Sales Deals", status: "draft", author: "bl-marketing", created: "2026-04-02", wordCount: 1200, seoScore: 92 },
   { id: "2", title: "Reading Micro-Expressions: A Practical Guide", status: "published", author: "bl-marketing", created: "2026-03-28", wordCount: 1500, seoScore: 88, views: 342 },
   { id: "3", title: "Non-Verbal Communication in Job Interviews", status: "published", author: "bl-marketing", created: "2026-03-21", wordCount: 1100, seoScore: 85, views: 528 },
@@ -26,14 +30,76 @@ const statusColors: Record<string, string> = {
   archived: "bg-slate-100 text-slate-600",
 };
 
+// ---------- Types ----------
+
+interface AgentActivity {
+  id: string;
+  activity_type: string;
+  title?: string;
+  status?: string;
+  agent_name?: string;
+  created_at?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface BlogPost {
+  id: string;
+  title: string;
+  status: string;
+  author: string;
+  created: string;
+  wordCount: number;
+  seoScore: number;
+  views?: number;
+}
+
+// ---------- Helpers ----------
+
+function activityToBlogPost(a: AgentActivity): BlogPost {
+  const meta = (a.metadata ?? {}) as Record<string, unknown>;
+  return {
+    id: a.id,
+    title: (a.title as string) || "Untitled",
+    status: (a.status as string) || "draft",
+    author: (a.agent_name as string) || "agent",
+    created: a.created_at ? a.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+    wordCount: (meta.word_count as number) ?? 0,
+    seoScore: (meta.seo_score as number) ?? 0,
+    views: (meta.views as number) ?? undefined,
+  };
+}
+
+// ---------- Component ----------
+
 export default function ContentPage() {
+  const { data: activities, loading } = useMCTable<AgentActivity>("agent_activity", {
+    orderBy: "created_at",
+    orderAsc: false,
+    limit: 50,
+  });
+
+  // Client-side filter for content-related activity types
+  const contentActivities = useMemo(
+    () => activities.filter((a) => a.activity_type === "content" || a.activity_type === "report"),
+    [activities]
+  );
+
+  const livePosts = useMemo(() => contentActivities.map(activityToBlogPost), [contentActivities]);
+
+  // Use live data when available, otherwise fall back to demo data
+  const blogPosts = livePosts.length > 0 ? livePosts : demoBlogPosts;
+
   return (
     <div className="space-y-6 max-w-[1400px]">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-montserrat font-bold text-navy-500">Content Pipeline</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {blogPosts.length} posts &middot; {blogPosts.filter(p => p.status === "draft").length} drafts awaiting review
+            {loading ? "Loading..." : (
+              <>
+                {blogPosts.length} posts &middot; {blogPosts.filter(p => p.status === "draft").length} drafts awaiting review
+              </>
+            )}
           </p>
         </div>
         <Button className="bg-teal-500 hover:bg-teal-600 text-white gap-2">

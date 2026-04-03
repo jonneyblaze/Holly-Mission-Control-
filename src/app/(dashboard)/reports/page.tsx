@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Search, Download } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useMCTable } from "@/lib/hooks/use-mission-control";
 
 interface Report {
   id: string;
@@ -12,7 +13,8 @@ interface Report {
   activity_type: string;
   title: string;
   summary: string;
-  workflow: string;
+  full_content?: string;
+  workflow?: string;
   created_at: string;
 }
 
@@ -27,14 +29,14 @@ const agentEmojis: Record<string, string> = {
   holly: "🤖",
 };
 
-const reports: Report[] = [
-  { id: "1", agent_id: "infra", activity_type: "report", title: "Daily Infrastructure Report — Apr 3", summary: "All 14 containers healthy. Disk at 62%. Redis restarted once (auto-recovered). No critical alerts.", workflow: "daily-infra", created_at: "2026-04-03T08:30:00Z" },
-  { id: "2", agent_id: "bl-marketing", activity_type: "report", title: "Weekly SEO Audit — W14", summary: "Checked 12 blog posts. 3 missing meta descriptions. 1 broken image link. Recommendations included.", workflow: "seo-audit-monthly", created_at: "2026-04-02T17:00:00Z" },
-  { id: "3", agent_id: "bl-qa", activity_type: "report", title: "Weekly Regression Test — W14", summary: "Auth flow: PASS. Enrollment: PASS. Checkout: PASS. Certificate: FAIL (timeout on PDF generation). Progress tracking: PASS.", workflow: "qa-weekly", created_at: "2026-04-02T14:00:00Z" },
-  { id: "4", agent_id: "bl-support", activity_type: "report", title: "Feedback Analysis — W14", summary: "12 new support tickets. 8 auto-replied. 2 escalated. Top theme: certificate downloads. KB gap identified.", workflow: "feedback-weekly", created_at: "2026-04-02T10:00:00Z" },
-  { id: "5", agent_id: "bl-marketing", activity_type: "report", title: "Competitor Analysis — March 2026", summary: "Monitored 5 competitors. New course launch by BodyTalk Pro (pricing undercuts by 15%). Recommendations included.", workflow: "competitor-monthly", created_at: "2026-03-31T17:00:00Z" },
-  { id: "6", agent_id: "bl-content", activity_type: "report", title: "Course Content Audit — March 2026", summary: "4 thin lessons identified. 7 lessons missing interactives. 2 courses with stale content. Improvement plan attached.", workflow: "course-audit-monthly", created_at: "2026-03-31T12:00:00Z" },
-  { id: "7", agent_id: "holly", activity_type: "report", title: "Weekly Business Report — W13", summary: "Revenue: \u20AC4,200 (84% target). 8 new enrollments. NPS: 72. 3 deals progressed. Full breakdown below.", workflow: "weekly-report", created_at: "2026-03-28T17:00:00Z" },
+const demoReports: Report[] = [
+  { id: "demo-1", agent_id: "infra", activity_type: "report", title: "Daily Infrastructure Report — Apr 3", summary: "All 14 containers healthy. Disk at 62%. Redis restarted once (auto-recovered). No critical alerts.", workflow: "daily-infra", created_at: "2026-04-03T08:30:00Z" },
+  { id: "demo-2", agent_id: "bl-marketing", activity_type: "report", title: "Weekly SEO Audit — W14", summary: "Checked 12 blog posts. 3 missing meta descriptions. 1 broken image link. Recommendations included.", workflow: "seo-audit-monthly", created_at: "2026-04-02T17:00:00Z" },
+  { id: "demo-3", agent_id: "bl-qa", activity_type: "report", title: "Weekly Regression Test — W14", summary: "Auth flow: PASS. Enrollment: PASS. Checkout: PASS. Certificate: FAIL (timeout on PDF generation). Progress tracking: PASS.", workflow: "qa-weekly", created_at: "2026-04-02T14:00:00Z" },
+  { id: "demo-4", agent_id: "bl-support", activity_type: "report", title: "Feedback Analysis — W14", summary: "12 new support tickets. 8 auto-replied. 2 escalated. Top theme: certificate downloads. KB gap identified.", workflow: "feedback-weekly", created_at: "2026-04-02T10:00:00Z" },
+  { id: "demo-5", agent_id: "bl-marketing", activity_type: "report", title: "Competitor Analysis — March 2026", summary: "Monitored 5 competitors. New course launch by BodyTalk Pro (pricing undercuts by 15%). Recommendations included.", workflow: "competitor-monthly", created_at: "2026-03-31T17:00:00Z" },
+  { id: "demo-6", agent_id: "bl-content", activity_type: "report", title: "Course Content Audit — March 2026", summary: "4 thin lessons identified. 7 lessons missing interactives. 2 courses with stale content. Improvement plan attached.", workflow: "course-audit-monthly", created_at: "2026-03-31T12:00:00Z" },
+  { id: "demo-7", agent_id: "holly", activity_type: "report", title: "Weekly Business Report — W13", summary: "Revenue: €4,200 (84% target). 8 new enrollments. NPS: 72. 3 deals progressed. Full breakdown below.", workflow: "weekly-report", created_at: "2026-03-28T17:00:00Z" },
 ];
 
 const typeBadgeColors: Record<string, string> = {
@@ -46,6 +48,16 @@ const typeBadgeColors: Record<string, string> = {
 export default function ReportsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterAgent, setFilterAgent] = useState<string | null>(null);
+
+  const { data: liveData, loading } = useMCTable<Report>("agent_activity", {
+    realtime: true,
+    limit: 200,
+  });
+
+  // Use live data when available, otherwise fall back to demo data
+  const reports = useMemo(() => {
+    return liveData && liveData.length > 0 ? liveData : demoReports;
+  }, [liveData]);
 
   const filtered = reports.filter((r) => {
     const matchesSearch =
@@ -64,6 +76,7 @@ export default function ReportsPage() {
         <h1 className="text-2xl font-montserrat font-bold text-navy-500">Reports</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           All agent outputs &middot; {reports.length} reports
+          {loading && " (loading...)"}
         </p>
       </div>
 
@@ -98,7 +111,7 @@ export default function ReportsPage() {
                 filterAgent === agent ? "bg-navy-500 text-white" : "bg-white border text-muted-foreground hover:bg-muted"
               )}
             >
-              {agentEmojis[agent]} {agent}
+              {agentEmojis[agent] || "🤖"} {agent}
             </button>
           ))}
         </div>
@@ -122,7 +135,9 @@ export default function ReportsPage() {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {report.agent_id} &middot; {report.workflow} &middot;{" "}
+                    {report.agent_id}
+                    {report.workflow && <> &middot; {report.workflow}</>}
+                    {" "}&middot;{" "}
                     {formatDistanceToNow(new Date(report.created_at), { addSuffix: true })}
                   </p>
                 </div>
