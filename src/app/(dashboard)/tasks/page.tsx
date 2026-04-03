@@ -42,15 +42,15 @@ const segmentColors: Record<string, string> = {
   general: "bg-slate-100 text-slate-600",
 };
 
-// Fallback tasks when DB is empty
-const fallbackTasks: Task[] = [
-  { id: "f1", title: "Write blog post about micro-expressions", status: "todo", priority: "high", segment: "bodylytics", assigned_agent: "bl-marketing", source: "workflow" },
-  { id: "f2", title: "Prepare Duracell onboarding talking points", status: "todo", priority: "medium", segment: "duracell", assigned_agent: "duracell-prep", source: "manual" },
-  { id: "f3", title: "Fix certificate download bug", status: "in_progress", priority: "urgent", segment: "bodylytics", assigned_agent: "devops", source: "agent" },
-  { id: "f4", title: "Create Instagram carousel: deception cues", status: "in_progress", priority: "medium", segment: "bodylytics", assigned_agent: "bl-social", source: "workflow" },
-  { id: "f5", title: "Review SEO audit results", status: "review", priority: "medium", segment: "bodylytics", source: "agent" },
-  { id: "f6", title: "Weekly infrastructure report", status: "done", priority: "low", segment: "bodylytics", assigned_agent: "infra", source: "workflow" },
-];
+// Demo tasks kept for reference only - not displayed in the UI
+// const fallbackTasks: Task[] = [
+//   { id: "f1", title: "Write blog post about micro-expressions", status: "todo", priority: "high", segment: "bodylytics", assigned_agent: "bl-marketing", source: "workflow" },
+//   { id: "f2", title: "Prepare Duracell onboarding talking points", status: "todo", priority: "medium", segment: "duracell", assigned_agent: "duracell-prep", source: "manual" },
+//   { id: "f3", title: "Fix certificate download bug", status: "in_progress", priority: "urgent", segment: "bodylytics", assigned_agent: "devops", source: "agent" },
+//   { id: "f4", title: "Create Instagram carousel: deception cues", status: "in_progress", priority: "medium", segment: "bodylytics", assigned_agent: "bl-social", source: "workflow" },
+//   { id: "f5", title: "Review SEO audit results", status: "review", priority: "medium", segment: "bodylytics", source: "agent" },
+//   { id: "f6", title: "Weekly infrastructure report", status: "done", priority: "low", segment: "bodylytics", assigned_agent: "infra", source: "workflow" },
+// ];
 
 export default function TasksPage() {
   const { data: liveTasks, loading, refetch } = useMCTable<Task>("tasks", {
@@ -60,7 +60,7 @@ export default function TasksPage() {
   const { insert, loading: inserting } = useMCInsert("tasks");
   const { update } = useMCUpdate("tasks");
 
-  const tasks = liveTasks.length > 0 ? liveTasks : fallbackTasks;
+  const tasks = liveTasks;
   const [draggedTask, setDraggedTask] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTask, setNewTask] = useState({
@@ -74,22 +74,19 @@ export default function TasksPage() {
   const handleDrop = useCallback(
     async (columnId: string) => {
       if (!draggedTask) return;
-      // Only update if we have live tasks (not fallback)
-      if (liveTasks.length > 0) {
-        try {
-          await update(draggedTask, {
-            status: columnId,
-            ...(columnId === "done" ? { completed_at: new Date().toISOString() } : {}),
-          });
-          toast.success("Task moved");
-          refetch();
-        } catch {
-          toast.error("Failed to move task");
-        }
+      try {
+        await update(draggedTask, {
+          status: columnId,
+          ...(columnId === "done" ? { completed_at: new Date().toISOString() } : {}),
+        });
+        toast.success("Task moved");
+        refetch();
+      } catch {
+        toast.error("Failed to move task");
       }
       setDraggedTask(null);
     },
-    [draggedTask, liveTasks.length, update, refetch]
+    [draggedTask, update, refetch]
   );
 
   const handleAddTask = async () => {
@@ -145,29 +142,43 @@ export default function TasksPage() {
                   <span className="text-xs text-muted-foreground bg-white px-2 py-0.5 rounded-full">{colTasks.length}</span>
                 </div>
                 <div className="space-y-2">
-                  {colTasks.map((task) => (
-                    <div
-                      key={task.id}
-                      draggable
-                      onDragStart={() => setDraggedTask(task.id)}
-                      className={cn(
-                        "bg-white rounded-lg border border-border p-3 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow",
-                        draggedTask === task.id && "opacity-50"
+                  {colTasks.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <p className="text-sm text-muted-foreground">No tasks</p>
+                      {col.id === "todo" && (
+                        <button
+                          onClick={() => setShowAddModal(true)}
+                          className="mt-2 text-xs text-teal-500 hover:text-teal-600 font-medium"
+                        >
+                          + Add Task
+                        </button>
                       )}
-                    >
-                      <div className="flex items-start gap-2">
-                        <GripVertical className="w-3 h-3 text-muted-foreground mt-1 flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-navy-500 mb-1.5">{task.title}</p>
-                          <div className="flex flex-wrap gap-1">
-                            <Badge className={cn("text-[9px] px-1.5 py-0", priorityColors[task.priority] || "bg-slate-100")}>{task.priority}</Badge>
-                            {task.segment && <Badge className={cn("text-[9px] px-1.5 py-0", segmentColors[task.segment] || "bg-slate-100")}>{task.segment}</Badge>}
-                            {task.assigned_agent && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{task.assigned_agent}</Badge>}
+                    </div>
+                  ) : (
+                    colTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        draggable
+                        onDragStart={() => setDraggedTask(task.id)}
+                        className={cn(
+                          "bg-white rounded-lg border border-border p-3 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow",
+                          draggedTask === task.id && "opacity-50"
+                        )}
+                      >
+                        <div className="flex items-start gap-2">
+                          <GripVertical className="w-3 h-3 text-muted-foreground mt-1 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-navy-500 mb-1.5">{task.title}</p>
+                            <div className="flex flex-wrap gap-1">
+                              <Badge className={cn("text-[9px] px-1.5 py-0", priorityColors[task.priority] || "bg-slate-100")}>{task.priority}</Badge>
+                              {task.segment && <Badge className={cn("text-[9px] px-1.5 py-0", segmentColors[task.segment] || "bg-slate-100")}>{task.segment}</Badge>}
+                              {task.assigned_agent && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{task.assigned_agent}</Badge>}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             );
@@ -241,15 +252,15 @@ export default function TasksPage() {
                   className="w-full h-10 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/30"
                 >
                   <option value="">Manual (no agent)</option>
-                  <option value="bl-marketing">📈 Marketing</option>
-                  <option value="bl-social">📱 Social</option>
-                  <option value="bl-content">✍️ Content</option>
-                  <option value="bl-support">🎧 Support</option>
-                  <option value="bl-community">🤝 Community</option>
-                  <option value="bl-qa">🧪 QA</option>
-                  <option value="infra">🏗️ Infra</option>
-                  <option value="devops">⚙️ DevOps</option>
-                  <option value="duracell-prep">💼 Duracell Prep</option>
+                  <option value="bl-marketing">Marketing</option>
+                  <option value="bl-social">Social</option>
+                  <option value="bl-content">Content</option>
+                  <option value="bl-support">Support</option>
+                  <option value="bl-community">Community</option>
+                  <option value="bl-qa">QA</option>
+                  <option value="infra">Infra</option>
+                  <option value="devops">DevOps</option>
+                  <option value="duracell-prep">Duracell Prep</option>
                 </select>
               </div>
               <Button onClick={handleAddTask} disabled={inserting || !newTask.title.trim()} className="w-full bg-teal-500 hover:bg-teal-600 text-white">
