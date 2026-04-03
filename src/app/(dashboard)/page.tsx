@@ -4,18 +4,15 @@ import { useEffect, useState, useMemo } from "react";
 import {
   DollarSign,
   GraduationCap,
-  Headphones,
   Bot,
   PenLine,
   Search,
   Megaphone,
   Target,
   Loader2,
-  CheckCircle2,
   Wifi,
   WifiOff,
   Users,
-  Server,
 } from "lucide-react";
 import MetricCard from "@/components/dashboard/MetricCard";
 import GoalGauge from "@/components/dashboard/GoalGauge";
