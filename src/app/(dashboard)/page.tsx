@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   DollarSign,
   GraduationCap,
@@ -68,6 +68,13 @@ export default function DashboardPage() {
   }>>("get_business_goals_progress", { refreshInterval: 300000 });
 
   const [greeting, setGreeting] = useState("Good morning");
+  const renderCount = useRef(0);
+  renderCount.current++;
+
+  // Debug: track every render and data state
+  useEffect(() => {
+    console.log(`[MC-DEBUG] render #${renderCount.current} | activities: ${activities.length} | loading: ${activitiesLoading} | error: ${activitiesError || 'none'}`);
+  });
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -135,6 +142,11 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-2xl font-montserrat font-bold text-navy-500">Command Centre</h1>
         <p className="text-sm text-muted-foreground mt-0.5">{greeting}, Sean. Here&apos;s your overview.</p>
+      </div>
+
+      {/* Debug banner — remove after fixing */}
+      <div className="bg-slate-100 border border-slate-300 rounded-lg p-3 text-xs font-mono text-slate-700">
+        DEBUG: render #{renderCount.current} | activities: {activities.length} | loading: {String(activitiesLoading)} | error: {activitiesError || 'none'} | showing: {isLive ? 'LIVE' : 'DEMO'}
       </div>
 
       {activitiesError && (
