@@ -45,7 +45,7 @@ const quickActions = [
 
 export default function DashboardPage() {
   // Live data from Mission Control DB
-  const { data: activities, loading: activitiesLoading } = useMCTable<{
+  const { data: activities, loading: activitiesLoading, error: activitiesError } = useMCTable<{
     id: string;
     agent_id: string;
     activity_type: string;
@@ -77,7 +77,8 @@ export default function DashboardPage() {
   }, []);
 
   // Use live data or fallback
-  const displayActivities = activities.length > 0 ? activities : fallbackActivities;
+  const isLive = activities.length > 0;
+  const displayActivities = isLive ? activities : fallbackActivities;
 
   // Build metrics from live data or fallback
   const revenue = blDashboard?.total_revenue ?? 2340;
@@ -135,6 +136,17 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-montserrat font-bold text-navy-500">Command Centre</h1>
         <p className="text-sm text-muted-foreground mt-0.5">{greeting}, Sean. Here&apos;s your overview.</p>
       </div>
+
+      {activitiesError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+          <strong>Supabase connection error:</strong> {activitiesError} — Check NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel env vars
+        </div>
+      )}
+      {!activitiesError && !activitiesLoading && !isLive && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
+          Showing demo data — no live data found. Either the database is empty or the connection failed silently.
+        </div>
+      )}
 
       <AlertBanner alerts={alerts} />
 

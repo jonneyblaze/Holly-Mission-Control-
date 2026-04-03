@@ -41,11 +41,16 @@ export function useMCTable<T = Record<string, unknown>>(
       }
 
       const { data: rows, error: err } = await query;
-      if (err) throw err;
+      if (err) {
+        console.error(`[MC] ${table} query failed:`, err.message);
+        throw err;
+      }
       setData((rows as T[]) || []);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error(`[MC] ${table} error:`, msg);
+      setError(msg);
     } finally {
       setLoading(false);
     }
