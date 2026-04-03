@@ -32,9 +32,8 @@ interface InfraSnapshot {
   id: string;
   snapshot_at: string;
   containers: InfraContainer[];
-  disk_usage: number;
-  memory_usage: number;
-  cpu_usage?: number;
+  disk_usage: { total?: string; used?: string; percent?: number } | null;
+  memory_usage: { total?: string; used?: string; percent?: number } | null;
   alerts: InfraAlert[];
   edge_functions: InfraEdgeFunction[];
 }
@@ -95,9 +94,9 @@ export default function InfrastructurePage() {
   const containers = latest?.containers ?? demoContainers;
   const alerts = latest?.alerts ?? demoAlerts;
   const edgeFunctions = latest?.edge_functions ?? demoEdgeFunctions;
-  const diskUsage = latest?.disk_usage ?? demoDiskUsage;
-  const memoryUsage = latest?.memory_usage ?? demoMemoryUsage;
-  const cpuUsage = latest?.cpu_usage ?? demoCpuUsage;
+  const diskUsage = latest?.disk_usage?.percent ?? demoDiskUsage;
+  const memoryUsage = latest?.memory_usage?.percent ?? demoMemoryUsage;
+  const cpuUsage = demoCpuUsage; // no cpu_usage in snapshot schema
 
   return (
     <div className="space-y-6 max-w-[1400px]">

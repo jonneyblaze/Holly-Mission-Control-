@@ -11,7 +11,7 @@ import { useMCTable } from "@/lib/hooks/use-mission-control";
 interface KBGapRow {
   id: string;
   topic: string;
-  occurrences: number;
+  occurrence_count: number;
   status: string;
   drafted_by?: string | null;
   created_at: string;
@@ -82,7 +82,7 @@ export default function SupportPage() {
   // Live data from Supabase
   const { data: liveKBGaps, loading: kbLoading } = useMCTable<KBGapRow>("kb_gaps", {
     realtime: true,
-    orderBy: "occurrences",
+    orderBy: "occurrence_count",
     orderAsc: false,
   });
 
@@ -122,7 +122,7 @@ export default function SupportPage() {
     liveKBGaps.length > 0
       ? liveKBGaps.map((g) => ({
           topic: g.topic,
-          occurrences: g.occurrences,
+          occurrences: g.occurrence_count,
           status: g.status,
           draftedBy: g.drafted_by ?? undefined,
         }))

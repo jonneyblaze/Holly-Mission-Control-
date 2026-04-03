@@ -11,21 +11,12 @@ import { useBodylyticsRpc } from "@/lib/hooks/use-bodylytics";
 
 interface GoalSnapshot {
   id: string;
-  label: string;
-  actual: number;
-  target: number;
-  unit?: string;
+  snapshot_date: string;
+  period_type: string;
+  metrics: Record<string, { target: number; actual: number; pace: number }>;
+  alerts: { kpi: string; message: string; severity: string }[];
+  corrective_actions: { kpi: string; action: string; agent: string; status: string }[];
   created_at: string;
-}
-
-interface CorrectiveAction {
-  id: string;
-  kpi: string;
-  action: string;
-  agent: string;
-  status: string;
-  triggeredAt: string;
-  triggered_at?: string;
 }
 
 interface DashboardMetrics {
@@ -50,39 +41,19 @@ const DEMO_GOALS = [
   { label: "Proposals Sent", actual: 4, target: 8 },
 ];
 
+interface CorrectiveAction {
+  id: string;
+  kpi: string;
+  action: string;
+  agent: string;
+  status: string;
+}
+
 const DEMO_CORRECTIVE_ACTIONS: CorrectiveAction[] = [
-  {
-    id: "1",
-    kpi: "Revenue",
-    action: "Flash sale campaign: 20% off NVC for Sales course",
-    agent: "bl-marketing",
-    status: "pending",
-    triggeredAt: "2026-04-02T09:00:00Z",
-  },
-  {
-    id: "2",
-    kpi: "Revenue",
-    action: "Email blast to unconverted leads with value-first content",
-    agent: "bl-marketing",
-    status: "executing",
-    triggeredAt: "2026-04-02T09:00:00Z",
-  },
-  {
-    id: "3",
-    kpi: "Blog Posts",
-    action: "Batch write 3 blog posts: micro-expressions, deception cues, mirroring",
-    agent: "bl-marketing",
-    status: "done",
-    triggeredAt: "2026-04-01T09:00:00Z",
-  },
-  {
-    id: "4",
-    kpi: "Enrollments",
-    action: "Referral boost campaign to existing students",
-    agent: "bl-social",
-    status: "pending",
-    triggeredAt: "2026-04-02T09:00:00Z",
-  },
+  { id: "1", kpi: "Revenue", action: "Flash sale campaign: 20% off NVC for Sales course", agent: "bl-marketing", status: "pending" },
+  { id: "2", kpi: "Revenue", action: "Email blast to unconverted leads with value-first content", agent: "bl-marketing", status: "executing" },
+  { id: "3", kpi: "Blog Posts", action: "Batch write 3 blog posts: micro-expressions, deception cues, mirroring", agent: "bl-marketing", status: "done" },
+  { id: "4", kpi: "Enrollments", action: "Referral boost campaign to existing students", agent: "bl-social", status: "pending" },
 ];
 
 const statusConfig = {
@@ -94,32 +65,31 @@ const statusConfig = {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function GoalsPage() {
-  // Mission Control: goal_snapshots with realtime
+  // Mission Control: goal_snapshots with realtime (latest first)
   const {
     data: goalSnapshots,
     loading: goalsLoading,
-  } = useMCTable<GoalSnapshot>("goal_snapshots", { realtime: true, orderBy: "created_at", orderAsc: false });
-
-  // Mission Control: corrective_actions with realtime
-  const {
-    data: liveActions,
-    loading: actionsLoading,
-  } = useMCTable<CorrectiveAction>("corrective_actions", { realtime: true, orderBy: "created_at", orderAsc: false });
+  } = useMCTable<GoalSnapshot>("goal_snapshots", { realtime: true, orderBy: "created_at", orderAsc: false, limit: 1 });
 
   // Bodylytics: business goals via RPC proxy
   const {
     data: dashboardMetrics,
   } = useBodylyticsRpc<DashboardMetrics>("get_dashboard_metrics");
 
+  const latestSnapshot = goalSnapshots.length > 0 ? goalSnapshots[0] : null;
+
   // Merge: live goal_snapshots > bodylytics business_goals > demo fallback
   const goals = useMemo(() => {
-    if (goalSnapshots && goalSnapshots.length > 0) {
-      return goalSnapshots.map((s) => ({
-        label: s.label,
-        actual: s.actual,
-        target: s.target,
-        unit: s.unit,
-      }));
+    if (latestSnapshot?.metrics) {
+      const m = latestSnapshot.metrics;
+      return Object.entries(m)
+        .filter(([, v]) => typeof v === "object" && v !== null && "target" in v)
+        .map(([key, v]) => ({
+          label: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " "),
+          actual: v.actual ?? 0,
+          target: v.target ?? 1,
+          unit: key === "revenue" ? "€" : undefined,
+        }));
     }
     if (dashboardMetrics?.business_goals && dashboardMetrics.business_goals.length > 0) {
       return dashboardMetrics.business_goals.map((g) => ({
@@ -130,20 +100,20 @@ export default function GoalsPage() {
       }));
     }
     return DEMO_GOALS;
-  }, [goalSnapshots, dashboardMetrics]);
+  }, [latestSnapshot, dashboardMetrics]);
 
-  // Merge: live corrective_actions > demo fallback
+  // Corrective actions from snapshot or demo
   const correctiveActions = useMemo(() => {
-    if (liveActions && liveActions.length > 0) {
-      return liveActions.map((a) => ({
+    if (latestSnapshot?.corrective_actions && latestSnapshot.corrective_actions.length > 0) {
+      return latestSnapshot.corrective_actions.map((a, i) => ({
+        id: String(i),
         ...a,
-        triggeredAt: a.triggered_at ?? a.triggeredAt,
       }));
     }
     return DEMO_CORRECTIVE_ACTIONS;
-  }, [liveActions]);
+  }, [latestSnapshot]);
 
-  const isLoading = goalsLoading || actionsLoading;
+  const isLoading = goalsLoading;
 
   return (
     <div className="space-y-6 max-w-[1400px]">
