@@ -1,14 +1,24 @@
 "use client";
 
-import { Bell, Search, RefreshCw } from "lucide-react";
+import { Bell, Search, RefreshCw, LogOut } from "lucide-react";
 import { useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 export default function Topbar() {
   const [refreshing, setRefreshing] = useState(false);
+  const router = useRouter();
+  const supabase = createClient();
 
   const handleRefresh = () => {
     setRefreshing(true);
     window.location.reload();
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
   };
 
   return (
@@ -43,6 +53,13 @@ export default function Topbar() {
         <div className="w-8 h-8 rounded-full bg-navy-500 flex items-center justify-center ml-2">
           <span className="text-xs font-bold text-white">SM</span>
         </div>
+        <button
+          onClick={handleSignOut}
+          className="p-2 rounded-lg hover:bg-red-50 transition-colors"
+          title="Sign out"
+        >
+          <LogOut className="w-4 h-4 text-muted-foreground hover:text-red-500" />
+        </button>
       </div>
     </header>
   );
