@@ -4,8 +4,8 @@
     {
       "name": "mission-control",
       "runtimeExecutable": "/bin/bash",
-      "runtimeArgs": ["-c", "cd /Users/sean/Documents/GitHub/Holly-Mission-Control- && /opt/homebrew/bin/npm run dev"],
-      "port": 3000
+      "runtimeArgs": ["-c", "cd /Users/sean/Documents/GitHub/Holly-Mission-Control- && /opt/homebrew/bin/npx next dev -p 3001"],
+      "port": 3001
     }
   ]
 }
