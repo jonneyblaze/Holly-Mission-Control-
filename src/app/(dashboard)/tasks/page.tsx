@@ -75,6 +75,19 @@ const segmentColors: Record<string, string> = {
 
 const columnOrder = ["todo", "in_progress", "review", "done"];
 
+const agentEmojis: Record<string, string> = {
+  holly: "📋",
+  "bl-marketing": "📈",
+  "bl-social": "📱",
+  "bl-community": "🤝",
+  "bl-content": "✍️",
+  "bl-support": "🎧",
+  "bl-qa": "🧪",
+  infra: "🏗️",
+  devops: "⚙️",
+  "duracell-prep": "💼",
+};
+
 const agentLabels: Record<string, string> = {
   holly: "Holly",
   "bl-marketing": "Marketing",
@@ -683,47 +696,47 @@ function ClarificationCard({
   };
 
   return (
-    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-      <div className="flex items-start gap-3">
-        <div className="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
-          <MessageCircleQuestion className="w-4 h-4 text-white" />
-        </div>
+    <div className="bg-white border border-amber-200 rounded-lg p-3">
+      <div className="flex items-start gap-2.5">
+        <span className="text-base mt-0.5">
+          {agentEmojis[clarification.agent_id] || "🤖"}
+        </span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-bold text-amber-900">{agentName}</span>
-            <span className="text-xs text-amber-600">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <span className="text-xs font-bold text-amber-900">{agentName}</span>
+            <span className="text-[10px] text-amber-500">
               {formatDistanceToNow(new Date(clarification.created_at), { addSuffix: true })}
             </span>
             {matchingTask ? (
               <button
                 onClick={() => onOpenTask(matchingTask)}
-                className="text-xs text-teal-600 hover:text-teal-700 font-medium underline"
+                className="text-[10px] text-teal-600 hover:text-teal-700 font-medium underline"
               >
-                View task: {matchingTask.title}
+                Task: {matchingTask.title}
               </button>
             ) : (
-              <span className="text-xs text-amber-500 italic">No linked task</span>
+              <span className="text-[10px] text-amber-400 italic">no linked task</span>
             )}
           </div>
-          <p className="text-sm text-amber-900 bg-amber-100/60 rounded-lg px-3 py-2 mb-3">
+          <p className="text-xs text-amber-800 line-clamp-2 mb-2">
             {clarification.full_content || clarification.summary || clarification.title}
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-1.5">
             <input
               type="text"
               value={response}
               onChange={(e) => setResponse(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleRespond()}
               placeholder="Type your response..."
-              className="flex-1 h-9 px-3 bg-white border border-amber-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+              className="flex-1 h-8 px-2.5 bg-slate-50 border border-amber-200 rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-amber-400/30"
             />
             <Button
               onClick={handleRespond}
               disabled={sending || !response.trim()}
               size="sm"
-              className="bg-amber-600 hover:bg-amber-700 text-white h-9 px-4"
+              className="bg-amber-600 hover:bg-amber-700 text-white h-8 px-3 text-xs"
             >
-              {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Respond"}
+              {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Send"}
             </Button>
           </div>
         </div>
@@ -892,18 +905,12 @@ export default function TasksPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Clarification notification badge — click scrolls to panel */}
+          {/* Clarification count badge */}
           {totalClarifications > 0 && (
-            <button
-              onClick={() => document.getElementById("clarification-panel")?.scrollIntoView({ behavior: "smooth" })}
-              className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl animate-pulse hover:bg-amber-100 transition-colors"
-            >
-              <Bell className="w-4 h-4 text-amber-600" />
-              <span className="text-sm font-medium text-amber-800">
-                {totalClarifications} agent{totalClarifications > 1 ? "s" : ""}{" "}
-                asking for details ↓
-              </span>
-            </button>
+            <Badge className="bg-amber-100 text-amber-800 border border-amber-300 animate-pulse gap-1.5 px-3 py-1.5">
+              <Bell className="w-3.5 h-3.5" />
+              {totalClarifications} awaiting response
+            </Badge>
           )}
           <Button
             onClick={() => setShowAddModal(true)}
@@ -915,29 +922,38 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Clarification Panel — shows ALL pending clarifications with inline respond */}
+      {/* Clarification Strip — compact, collapsible */}
       {allPendingClarifications.length > 0 && (
-        <div id="clarification-panel" className="space-y-3">
-          <h2 className="text-sm font-semibold text-amber-800 flex items-center gap-2">
-            <MessageCircleQuestion className="w-4 h-4" />
-            Agent Clarification Requests
-          </h2>
-          {allPendingClarifications.map((clar) => {
-            const matchingTask = tasks.find((t) => t.id === clar.metadata?.task_id);
-            return (
-              <ClarificationCard
-                key={clar.id}
-                clarification={clar}
-                matchingTask={matchingTask || null}
-                onResponded={() => {
-                  refetch();
-                  refetchClarifications();
-                }}
-                onOpenTask={(task) => setEditingTask(task)}
-              />
-            );
-          })}
-        </div>
+        <details
+          id="clarification-panel"
+          open
+          className="bg-amber-50/80 border border-amber-200 rounded-xl overflow-hidden"
+        >
+          <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer select-none hover:bg-amber-100/60 transition-colors">
+            <MessageCircleQuestion className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <span className="text-sm font-semibold text-amber-800 flex-1">
+              {totalClarifications} Agent{totalClarifications > 1 ? "s" : ""} Asking for Details
+            </span>
+            <ChevronRight className="w-4 h-4 text-amber-500 transition-transform [details[open]_&]:rotate-90" />
+          </summary>
+          <div className="px-3 pb-3 space-y-2 max-h-[280px] overflow-y-auto">
+            {allPendingClarifications.map((clar) => {
+              const matchingTask = tasks.find((t) => t.id === clar.metadata?.task_id);
+              return (
+                <ClarificationCard
+                  key={clar.id}
+                  clarification={clar}
+                  matchingTask={matchingTask || null}
+                  onResponded={() => {
+                    refetch();
+                    refetchClarifications();
+                  }}
+                  onOpenTask={(task) => setEditingTask(task)}
+                />
+              );
+            })}
+          </div>
+        </details>
       )}
 
       {loading ? (
