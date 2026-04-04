@@ -19,7 +19,13 @@ import {
   AlertCircle,
   Zap,
   Calendar,
-  FileText,
+  ImagePlus,
+  Image as ImageIcon,
+  Heart,
+  MessageCircle,
+  Share2,
+  ThumbsUp,
+  Repeat2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, addDays, startOfWeek, isSameDay } from "date-fns";
@@ -221,6 +227,47 @@ export default function SocialPage() {
       toast.error("Failed to create post");
     }
   };
+
+  // Generate image for a post
+  const [generatingImage, setGeneratingImage] = useState<string | null>(null);
+  const handleGenerateImage = useCallback(async (postId: string, content: string, platform: string) => {
+    setGeneratingImage(postId);
+    try {
+      // Extract key topic from content for image prompt
+      const shortContent = content.slice(0, 100).replace(/[*#\n]/g, "");
+      const prompt = `${shortContent}, ${platform}, social media visual, body language, professional`;
+
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          style: platform === "instagram" ? "vibrant, colorful, lifestyle" :
+                 platform === "tiktok" ? "dynamic, energetic, modern" :
+                 "professional, corporate, clean",
+          width: platform === "instagram" ? 1080 : 1200,
+          height: platform === "instagram" ? 1080 : 630,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+
+      // Update the post in DB
+      await update(postId, { media_url: data.url });
+      toast.success("Image generated!");
+      refetch();
+
+      // Update detail modal if open
+      if (showDetail?.id === postId) {
+        setShowDetail((prev) => prev ? { ...prev, media_url: data.url } : null);
+      }
+    } catch {
+      toast.error("Failed to generate image");
+    } finally {
+      setGeneratingImage(null);
+    }
+  }, [update, refetch, showDetail]);
 
   // Generate social posts via bl-social
   const [generating, setGenerating] = useState(false);
@@ -447,154 +494,302 @@ export default function SocialPage() {
         </div>
       )}
 
-      {/* Post Detail / Edit Modal */}
-      {showDetail && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
-            {/* Fixed header */}
-            <div className="flex items-center justify-between p-5 pb-3 border-b border-border/50 flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-montserrat font-bold text-navy-500">Post Details</h2>
-                <Badge className={cn("text-xs", statusColors[showDetail.status])}>{showDetail.status}</Badge>
-              </div>
-              <button onClick={() => setShowDetail(null)} className="p-1.5 rounded-lg hover:bg-muted transition-colors"><X className="w-4 h-4" /></button>
-            </div>
+      {/* Post Detail / Platform Preview Modal */}
+      {showDetail && (() => {
+        const pConfig = platformConfig[showDetail.platform];
+        const PIcon = pConfig?.icon || Globe;
+        const isLinkedIn = showDetail.platform === "linkedin";
+        const isInstagram = showDetail.platform === "instagram";
+        const isTikTok = showDetail.platform === "tiktok";
+        const isYouTube = showDetail.platform === "youtube";
 
-            {/* Scrollable content */}
-            <div className="overflow-y-auto flex-1 p-5 space-y-4">
-              {/* Platform + author */}
-              <div className="flex items-center gap-2">
-                {(() => {
-                  const platform = platformConfig[showDetail.platform];
-                  const PIcon = platform?.icon || Globe;
-                  return (
-                    <>
-                      <div className={cn("p-2 rounded-lg", platform?.bg)}>
-                        <PIcon className={cn("w-4 h-4", platform?.color)} />
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between p-4 border-b border-border/50 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className={cn("p-1.5 rounded-lg", pConfig?.bg)}>
+                    <PIcon className={cn("w-4 h-4", pConfig?.color)} />
+                  </div>
+                  <span className="text-sm font-bold text-navy-500">{pConfig?.label || showDetail.platform} Preview</span>
+                  <Badge className={cn("text-[10px]", statusColors[showDetail.status])}>{showDetail.status}</Badge>
+                </div>
+                <button onClick={() => setShowDetail(null)} className="p-1.5 rounded-lg hover:bg-muted"><X className="w-4 h-4" /></button>
+              </div>
+
+              {/* Scrollable platform preview */}
+              <div className="overflow-y-auto flex-1 p-5">
+                {/* ========== LINKEDIN PREVIEW ========== */}
+                {isLinkedIn && (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm max-w-md mx-auto">
+                    {/* Author row */}
+                    <div className="p-3 flex items-center gap-2.5">
+                      <div className="w-10 h-10 rounded-full bg-teal-500 flex items-center justify-center">
+                        <span className="text-xs font-bold text-white">BL</span>
                       </div>
-                      <span className="text-sm font-medium">{platform?.label || showDetail.platform}</span>
-                    </>
-                  );
-                })()}
-                {showDetail.agent_id && (
-                  <span className="text-xs text-muted-foreground ml-auto">Created by {showDetail.agent_id}</span>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">BodyLytics</p>
+                        <p className="text-[10px] text-slate-500">Non-verbal Communication Training &middot; 1h</p>
+                      </div>
+                    </div>
+                    {/* Content */}
+                    <div className="px-3 pb-2">
+                      <div className="text-[13px] text-slate-800 leading-relaxed">
+                        {renderFormattedContent(showDetail.content)}
+                      </div>
+                    </div>
+                    {/* Image */}
+                    <div className="relative bg-slate-100 group">
+                      {showDetail.media_url ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={showDetail.media_url} alt="" className="w-full h-auto max-h-72 object-cover" />
+                          <button
+                            onClick={() => handleGenerateImage(showDetail.id, showDetail.content, showDetail.platform)}
+                            disabled={generatingImage === showDetail.id}
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[10px] font-medium shadow flex items-center gap-1"
+                          >
+                            {generatingImage === showDetail.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImagePlus className="w-3 h-3" />}
+                            New image
+                          </button>
+                        </>
+                      ) : (
+                        <div className="h-44 flex flex-col items-center justify-center">
+                          <ImageIcon className="w-8 h-8 text-slate-200 mb-2" />
+                          <button
+                            onClick={() => handleGenerateImage(showDetail.id, showDetail.content, showDetail.platform)}
+                            disabled={generatingImage === showDetail.id}
+                            className="text-xs text-teal-600 font-medium flex items-center gap-1 hover:text-teal-700"
+                          >
+                            {generatingImage === showDetail.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                            Generate AI image
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {/* Engagement bar */}
+                    <div className="px-3 py-2 border-t border-slate-100">
+                      <div className="flex items-center justify-between text-slate-500 text-[11px]">
+                        <span>{showDetail.analytics?.likes || 0} reactions</span>
+                        <span>{showDetail.analytics?.comments || 0} comments &middot; {showDetail.analytics?.shares || 0} reposts</span>
+                      </div>
+                    </div>
+                    <div className="flex border-t border-slate-100 divide-x divide-slate-100">
+                      {[
+                        { icon: ThumbsUp, label: "Like" },
+                        { icon: MessageCircle, label: "Comment" },
+                        { icon: Repeat2, label: "Repost" },
+                        { icon: Send, label: "Send" },
+                      ].map((action) => (
+                        <button key={action.label} className="flex-1 py-2.5 flex items-center justify-center gap-1.5 text-[11px] text-slate-600 hover:bg-slate-50">
+                          <action.icon className="w-3.5 h-3.5" />
+                          {action.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </div>
 
-              {/* Image / media */}
-              {showDetail.media_url && (
-                <div className="rounded-lg overflow-hidden border border-slate-200">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={showDetail.media_url}
-                    alt="Post media"
-                    className="w-full h-auto max-h-80 object-cover"
-                  />
-                </div>
-              )}
+                {/* ========== INSTAGRAM PREVIEW ========== */}
+                {isInstagram && (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm max-w-sm mx-auto">
+                    {/* Author row */}
+                    <div className="p-3 flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 p-[2px]">
+                        <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
+                          <span className="text-[8px] font-bold text-pink-600">BL</span>
+                        </div>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-900">bodylytics</p>
+                    </div>
+                    {/* Image */}
+                    <div className="relative aspect-square bg-slate-100 group">
+                      {showDetail.media_url ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={showDetail.media_url} alt="" className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => handleGenerateImage(showDetail.id, showDetail.content, showDetail.platform)}
+                            disabled={generatingImage === showDetail.id}
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 text-white px-2.5 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1"
+                          >
+                            {generatingImage === showDetail.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImagePlus className="w-3 h-3" />}
+                            New image
+                          </button>
+                        </>
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center">
+                          <ImageIcon className="w-12 h-12 text-slate-200 mb-3" />
+                          <button
+                            onClick={() => handleGenerateImage(showDetail.id, showDetail.content, showDetail.platform)}
+                            disabled={generatingImage === showDetail.id}
+                            className="text-xs text-pink-600 font-medium flex items-center gap-1"
+                          >
+                            {generatingImage === showDetail.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                            Generate AI image
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {/* Actions */}
+                    <div className="px-3 py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Heart className="w-5 h-5 text-slate-800" />
+                        <MessageCircle className="w-5 h-5 text-slate-800" />
+                        <Send className="w-5 h-5 text-slate-800" />
+                      </div>
+                      <Share2 className="w-5 h-5 text-slate-800" />
+                    </div>
+                    <div className="px-3 pb-1 text-xs font-semibold text-slate-900">
+                      {showDetail.analytics?.likes || 0} likes
+                    </div>
+                    {/* Caption */}
+                    <div className="px-3 pb-3">
+                      <p className="text-xs text-slate-800">
+                        <span className="font-semibold mr-1">bodylytics</span>
+                        <span className="leading-relaxed">{showDetail.content.slice(0, 200)}{showDetail.content.length > 200 && "..."}</span>
+                      </p>
+                      {showDetail.content.length > 200 && (
+                        <details className="mt-1">
+                          <summary className="text-[11px] text-slate-400 cursor-pointer">more</summary>
+                          <p className="text-xs text-slate-800 mt-1 leading-relaxed">{showDetail.content.slice(200)}</p>
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                )}
 
-              {/* Formatted content */}
-              <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                <div className="text-sm text-navy-500 leading-relaxed">
-                  {renderFormattedContent(showDetail.content)}
-                </div>
-                <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-200">
-                  <p className="text-[10px] text-muted-foreground">
-                    {showDetail.content.length} / {platformConfig[showDetail.platform]?.charLimit || "?"} characters
-                  </p>
-                  {showDetail.content.length > (platformConfig[showDetail.platform]?.charLimit || 9999) && (
-                    <p className="text-[10px] text-red-500 font-medium">Over limit!</p>
+                {/* ========== GENERIC PREVIEW (TikTok, YouTube, Twitter, etc.) ========== */}
+                {!isLinkedIn && !isInstagram && (
+                  <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm max-w-md mx-auto">
+                    <div className="p-3 flex items-center gap-2.5 border-b border-slate-100">
+                      <div className={cn("w-9 h-9 rounded-full flex items-center justify-center", pConfig?.bg || "bg-slate-100")}>
+                        <PIcon className={cn("w-4 h-4", pConfig?.color)} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">BodyLytics</p>
+                        <p className="text-[10px] text-slate-500">@bodylytics</p>
+                      </div>
+                    </div>
+                    {/* Image */}
+                    <div className="relative bg-slate-100 group">
+                      {showDetail.media_url ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={showDetail.media_url} alt="" className={cn("w-full object-cover", isTikTok || isYouTube ? "aspect-[9/16] max-h-80" : "max-h-72")} />
+                          <button
+                            onClick={() => handleGenerateImage(showDetail.id, showDetail.content, showDetail.platform)}
+                            disabled={generatingImage === showDetail.id}
+                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 backdrop-blur-sm px-2.5 py-1 rounded-lg text-[10px] font-medium shadow flex items-center gap-1"
+                          >
+                            {generatingImage === showDetail.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ImagePlus className="w-3 h-3" />}
+                            New image
+                          </button>
+                        </>
+                      ) : (
+                        <div className="h-44 flex flex-col items-center justify-center">
+                          <ImageIcon className="w-8 h-8 text-slate-200 mb-2" />
+                          <button
+                            onClick={() => handleGenerateImage(showDetail.id, showDetail.content, showDetail.platform)}
+                            disabled={generatingImage === showDetail.id}
+                            className="text-xs text-teal-600 font-medium flex items-center gap-1"
+                          >
+                            {generatingImage === showDetail.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                            Generate AI image
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {/* Content */}
+                    <div className="p-3">
+                      <div className="text-[13px] text-slate-800 leading-relaxed">
+                        {renderFormattedContent(showDetail.content)}
+                      </div>
+                    </div>
+                    <div className="px-3 pb-2 flex items-center justify-between text-slate-400">
+                      <div className="flex items-center gap-4">
+                        <Heart className="w-4 h-4" />
+                        <MessageCircle className="w-4 h-4" />
+                        <Share2 className="w-4 h-4" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Meta info below preview */}
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{showDetail.content.length} / {pConfig?.charLimit || "?"} chars</span>
+                    {showDetail.content.length > (pConfig?.charLimit || 9999) && (
+                      <span className="text-red-500 font-medium">Over character limit!</span>
+                    )}
+                    {showDetail.agent_id && <span>by {showDetail.agent_id}</span>}
+                  </div>
+                  {showDetail.scheduled_date && (
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Calendar className="w-3 h-3" />
+                      {format(new Date(showDetail.scheduled_date), "EEEE d MMM yyyy")}
+                      {showDetail.scheduled_time && ` at ${showDetail.scheduled_time}`}
+                    </div>
+                  )}
+                  {showDetail.notes && (
+                    <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-200">
+                      <p className="text-[10px] font-medium text-amber-800 mb-0.5">Notes</p>
+                      <p className="text-[11px] text-amber-700">{showDetail.notes}</p>
+                    </div>
+                  )}
+                  {showDetail.buffer_id && (
+                    <p className="text-[10px] text-muted-foreground">Buffer ID: {showDetail.buffer_id}</p>
                   )}
                 </div>
               </div>
 
-              {/* Meta info */}
-              <div className="space-y-2">
-                {showDetail.scheduled_date && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Scheduled: {format(new Date(showDetail.scheduled_date), "EEEE d MMM yyyy")}</span>
-                    {showDetail.scheduled_time && <span>at {showDetail.scheduled_time}</span>}
-                  </div>
-                )}
-
-                {showDetail.blog_post_id && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Linked to blog post</span>
-                  </div>
-                )}
-
-                {showDetail.notes && (
-                  <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-                    <p className="text-xs font-medium text-amber-800 mb-1">Notes</p>
-                    <p className="text-xs text-amber-700">{showDetail.notes}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Analytics */}
-              {showDetail.analytics && (showDetail.analytics.likes || showDetail.analytics.shares || showDetail.analytics.comments || showDetail.analytics.clicks) && (
-                <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
-                  <p className="text-xs font-medium text-emerald-800 mb-2">Analytics</p>
-                  <div className="grid grid-cols-4 gap-2 text-center">
-                    <div>
-                      <p className="text-lg font-bold text-emerald-700">{showDetail.analytics.likes || 0}</p>
-                      <p className="text-[10px] text-emerald-600">Likes</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-bold text-emerald-700">{showDetail.analytics.shares || 0}</p>
-                      <p className="text-[10px] text-emerald-600">Shares</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-bold text-emerald-700">{showDetail.analytics.comments || 0}</p>
-                      <p className="text-[10px] text-emerald-600">Comments</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-bold text-emerald-700">{showDetail.analytics.clicks || 0}</p>
-                      <p className="text-[10px] text-emerald-600">Clicks</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {showDetail.buffer_id && (
-                <p className="text-[10px] text-muted-foreground">Buffer ID: {showDetail.buffer_id}</p>
-              )}
-            </div>
-
-            {/* Fixed footer with actions */}
-            <div className="p-5 pt-3 border-t border-border/50 flex-shrink-0">
-              <div className="flex gap-2">
-                {showDetail.status === "draft" && (
-                  <>
+              {/* Actions footer */}
+              <div className="p-4 border-t border-border/50 flex-shrink-0">
+                <div className="flex gap-2">
+                  {!showDetail.media_url && (
                     <Button
                       variant="outline"
-                      onClick={() => handleReject(showDetail.id)}
-                      className="flex-1 text-red-600 hover:bg-red-50 border-red-200"
+                      size="sm"
+                      onClick={() => handleGenerateImage(showDetail.id, showDetail.content, showDetail.platform)}
+                      disabled={generatingImage === showDetail.id}
+                      className="gap-1.5"
                     >
-                      <X className="w-4 h-4 mr-1.5" />
-                      Reject
+                      {generatingImage === showDetail.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
+                      Add Image
                     </Button>
-                    <Button
-                      onClick={() => { handleApprove(showDetail); setShowDetail(null); }}
-                      className="flex-1 bg-teal-500 hover:bg-teal-600 text-white gap-1.5"
-                    >
-                      <Send className="w-4 h-4" />
-                      Approve & Schedule
+                  )}
+                  {showDetail.status === "draft" && (
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleReject(showDetail.id)}
+                        className="text-red-600 hover:bg-red-50 border-red-200"
+                      >
+                        <X className="w-4 h-4 mr-1" />
+                        Reject
+                      </Button>
+                      <Button
+                        onClick={() => { handleApprove(showDetail); setShowDetail(null); }}
+                        className="flex-1 bg-teal-500 hover:bg-teal-600 text-white gap-1.5"
+                      >
+                        <Send className="w-4 h-4" />
+                        Approve & Schedule
+                      </Button>
+                    </>
+                  )}
+                  {showDetail.status !== "draft" && (
+                    <Button variant="outline" onClick={() => setShowDetail(null)} className="flex-1">
+                      Close
                     </Button>
-                  </>
-                )}
-                {showDetail.status !== "draft" && (
-                  <Button variant="outline" onClick={() => setShowDetail(null)} className="w-full">
-                    Close
-                  </Button>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Create Post Modal */}
       {showCreate && (

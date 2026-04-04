@@ -165,6 +165,36 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// PATCH: Update a blog post field (e.g., featured_image_url)
+export async function PATCH(request: NextRequest) {
+  if (!BODYLYTICS_URL || !BODYLYTICS_KEY) {
+    return NextResponse.json({ error: "BodyLytics not configured" }, { status: 500 });
+  }
+
+  try {
+    const body = await request.json();
+    const { blog_post_id, ...fields } = body;
+
+    if (!blog_post_id) {
+      return NextResponse.json({ error: "blog_post_id required" }, { status: 400 });
+    }
+
+    const bodylytics = createClient(BODYLYTICS_URL, BODYLYTICS_KEY);
+    const { data, error } = await bodylytics
+      .from("blog_posts")
+      .update({ ...fields, updated_at: new Date().toISOString() })
+      .eq("id", blog_post_id)
+      .select("id, slug, title, featured_image_url")
+      .single();
+
+    if (error) throw error;
+    return NextResponse.json({ ok: true, post: data });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
 // GET: List blog posts from BodyLytics (for the content page)
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -177,9 +207,14 @@ export async function GET(request: NextRequest) {
   try {
     const bodylytics = createClient(BODYLYTICS_URL, BODYLYTICS_KEY);
 
+    const includeContent = searchParams.get("content") === "true";
+    const selectFields = includeContent
+      ? "id, title, slug, excerpt, content, status, category, published_at, created_at, updated_at, reading_time_minutes, featured_image_url, seo_title, seo_description"
+      : "id, title, slug, excerpt, status, category, published_at, created_at, updated_at, reading_time_minutes, featured_image_url, seo_title, seo_description";
+
     let query = bodylytics
       .from("blog_posts")
-      .select("id, title, slug, excerpt, status, category, published_at, created_at, updated_at, reading_time_minutes, featured_image_url, seo_title, seo_description")
+      .select(selectFields)
       .order("created_at", { ascending: false })
       .limit(50);
 
