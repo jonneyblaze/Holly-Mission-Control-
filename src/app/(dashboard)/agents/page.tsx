@@ -64,6 +64,7 @@ interface Task {
   assigned_agent: string | null;
   source: string;
   created_at: string;
+  updated_at: string;
   completed_at: string | null;
 }
 
@@ -548,7 +549,8 @@ export default function AgentsPage() {
       const lastTrigger = activities.find(
         (a) => a.agent_id === agent.agentId && (a.activity_type === "trigger" || a.activity_type === "task") && a.status === "pending"
       );
-      const workStartedAt = currentTask?.created_at || lastTrigger?.created_at;
+      // Use updated_at (when task moved to in_progress), not created_at (when task was first made)
+      const workStartedAt = currentTask?.updated_at || currentTask?.created_at || lastTrigger?.created_at;
 
       const timing = getTimingStatus(lastActivityTime);
       const isWorking = !!currentTask || timing.pulse;
@@ -587,8 +589,8 @@ export default function AgentsPage() {
     const cutoff = Date.now() - STUCK_MINS * 60 * 1000;
     return tasks.filter((t) => {
       if (t.status !== "in_progress" || !t.assigned_agent) return false;
-      const updatedAt = new Date(t.created_at).getTime();
-      return updatedAt < cutoff;
+      const lastUpdate = new Date(t.updated_at || t.created_at).getTime();
+      return lastUpdate < cutoff;
     });
   }, [tasks]);
 
@@ -703,7 +705,7 @@ export default function AgentsPage() {
           <div className="divide-y divide-red-100">
             {stuckTasks.map((task) => {
               const agent = agentRoster.find((a) => a.agentId === task.assigned_agent);
-              const minsStuck = Math.round((Date.now() - new Date(task.created_at).getTime()) / 60000);
+              const minsStuck = Math.round((Date.now() - new Date(task.updated_at || task.created_at).getTime()) / 60000);
               const isRetrying = retryingTask === task.id;
 
               return (
