@@ -88,6 +88,30 @@ const agentLabels: Record<string, string> = {
   "duracell-prep": "Duracell Prep",
 };
 
+const INGEST_KEY = "9eRse679@ohyEdCz&UAUL@V9V6t*xW@%47r4vQfFeThowllEBsIv";
+
+async function triggerAgentAPI(
+  agentId: string,
+  taskId: string,
+  taskTitle: string,
+  taskDescription?: string
+) {
+  const res = await fetch("/api/trigger-agent", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${INGEST_KEY}`,
+    },
+    body: JSON.stringify({
+      agent_id: agentId,
+      task_title: taskTitle,
+      task_description: taskDescription || undefined,
+      task_id: taskId,
+    }),
+  });
+  return res.json();
+}
+
 // ---------- Edit Task Modal ----------
 function EditTaskModal({
   task,
@@ -112,22 +136,18 @@ function EditTaskModal({
   });
   const [clarResponse, setClarResponse] = useState("");
 
+  const [triggering, setTriggering] = useState(false);
+
   const handleSave = async () => {
     if (!form.title.trim()) return;
     try {
-      await update(task.id, {
-        title: form.title.trim(),
-        description: form.description.trim() || null,
-        priority: form.priority,
-        segment: form.segment || null,
-        assigned_agent: form.assigned_agent || null,
-        due_date: form.due_date || null,
-        updated_at: new Date().toISOString(),
-      });
+      const agentChanged = form.assigned_agent !== (task.assigned_agent || "");
+      const newAgent = form.assigned_agent;
+      let finalDescription = form.description.trim() || null;
 
       // If there was a clarification response, append it to description and mark responded
       if (clarification && clarResponse.trim()) {
-        const updatedDesc = [
+        finalDescription = [
           form.description.trim(),
           `\n---\n**Clarification (${agentLabels[clarification.agent_id] || clarification.agent_id} asked):** ${clarification.full_content || clarification.summary}`,
           `**Response:** ${clarResponse.trim()}`,
@@ -135,16 +155,56 @@ function EditTaskModal({
           .filter(Boolean)
           .join("\n");
 
-        await update(task.id, {
-          description: updatedDesc,
-          updated_at: new Date().toISOString(),
-        });
-
         // Mark clarification as actioned
         await updateActivity(clarification.id, { status: "actioned" });
       }
 
-      toast.success("Task updated");
+      // If assigning to a new agent, set status to in_progress
+      const statusUpdate =
+        newAgent && (agentChanged || task.status === "todo")
+          ? { status: "in_progress" }
+          : {};
+
+      await update(task.id, {
+        title: form.title.trim(),
+        description: finalDescription,
+        priority: form.priority,
+        segment: form.segment || null,
+        assigned_agent: newAgent || null,
+        due_date: form.due_date || null,
+        ...statusUpdate,
+        updated_at: new Date().toISOString(),
+      });
+
+      // Trigger agent if: new agent assigned, or clarification answered (re-trigger same agent)
+      const shouldTrigger =
+        (newAgent && agentChanged) ||
+        (newAgent && clarification && clarResponse.trim());
+
+      if (shouldTrigger) {
+        setTriggering(true);
+        try {
+          const data = await triggerAgentAPI(
+            newAgent,
+            task.id,
+            form.title.trim(),
+            (finalDescription || undefined) as string | undefined
+          );
+          const label = agentLabels[newAgent] || newAgent;
+          if (data.ok) {
+            toast.success(`${label} is now working on it!`);
+          } else {
+            toast.warning(`Task saved but couldn't trigger ${label}`);
+          }
+        } catch {
+          toast.warning("Task saved but couldn't reach agent");
+        } finally {
+          setTriggering(false);
+        }
+      } else {
+        toast.success("Task updated");
+      }
+
       onSaved();
       onClose();
     } catch {
@@ -304,15 +364,15 @@ function EditTaskModal({
             </Button>
             <Button
               onClick={handleSave}
-              disabled={loading || !form.title.trim()}
+              disabled={loading || triggering || !form.title.trim()}
               className="flex-1 bg-teal-500 hover:bg-teal-600 text-white"
             >
-              {loading ? (
+              {loading || triggering ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : (
                 <CheckCircle2 className="w-4 h-4 mr-2" />
               )}
-              Save Changes
+              {triggering ? "Triggering agent..." : "Save Changes"}
             </Button>
           </div>
         </div>
@@ -339,20 +399,48 @@ function AddTaskModal({
     due_date: "",
   });
 
+  const [triggering, setTriggering] = useState(false);
+
   const handleAddTask = async () => {
     if (!newTask.title.trim()) return;
     try {
-      await insert({
+      const hasAgent = !!newTask.assigned_agent;
+      const result = await insert({
         title: newTask.title.trim(),
         description: newTask.description.trim() || null,
         priority: newTask.priority,
         segment: newTask.segment || null,
         assigned_agent: newTask.assigned_agent || null,
         due_date: newTask.due_date || null,
-        status: "todo",
+        status: hasAgent ? "in_progress" : "todo",
         source: "manual",
       });
-      toast.success("Task created");
+
+      // If agent assigned, trigger it immediately with the task ID
+      if (hasAgent && result?.id) {
+        setTriggering(true);
+        try {
+          const data = await triggerAgentAPI(
+            newTask.assigned_agent,
+            result.id,
+            newTask.title.trim(),
+            newTask.description.trim() || undefined
+          );
+          const label = agentLabels[newTask.assigned_agent] || newTask.assigned_agent;
+          if (data.ok) {
+            toast.success(`${label} is now working on it!`);
+          } else {
+            toast.warning(`Task created but couldn't trigger ${label}: ${data.error}`);
+          }
+        } catch {
+          toast.warning("Task created but couldn't reach agent");
+        } finally {
+          setTriggering(false);
+        }
+      } else {
+        toast.success("Task created");
+      }
+
       onCreated();
       onClose();
     } catch {
@@ -481,13 +569,17 @@ function AddTaskModal({
           </div>
           <Button
             onClick={handleAddTask}
-            disabled={inserting || !newTask.title.trim()}
+            disabled={inserting || triggering || !newTask.title.trim()}
             className="w-full bg-teal-500 hover:bg-teal-600 text-white"
           >
-            {inserting ? (
+            {inserting || triggering ? (
               <Loader2 className="w-4 h-4 animate-spin mr-2" />
             ) : null}
-            Create Task
+            {triggering
+              ? "Triggering agent..."
+              : newTask.assigned_agent
+              ? "Create & Assign to Agent"
+              : "Create Task"}
           </Button>
         </div>
       </div>

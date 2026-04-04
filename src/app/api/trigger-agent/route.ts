@@ -99,9 +99,8 @@ export async function POST(request: NextRequest) {
       // Timeout or network error — task is queued, agent will pick it up via cron
       const isAbort = err instanceof DOMException && err.name === "AbortError";
       if (isAbort) {
-        // The agent IS processing (just took > 10s) — that's fine
-        directTriggered = true;
-        console.log("[trigger-agent] Direct call timed out — agent likely processing");
+        // Timeout means we don't know if agent received it — keep it queued as fallback
+        console.log("[trigger-agent] Direct call timed out — relying on queue as backup");
       } else {
         console.log("[trigger-agent] Direct call failed, relying on queue");
       }

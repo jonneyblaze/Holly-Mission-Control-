@@ -123,7 +123,7 @@ function QuickTaskModal({
   const handleSubmit = async () => {
     if (!title.trim()) return;
     try {
-      // Create the task
+      // Create the task and capture the returned ID
       const taskData = {
         title: title.trim(),
         description: description.trim() || null,
@@ -132,9 +132,10 @@ function QuickTaskModal({
         assigned_agent: agentId,
         source: "manual",
       };
-      await insert(taskData);
+      const result = await insert(taskData);
+      const taskId = result?.id;
 
-      // Trigger the agent via OpenClaw
+      // Trigger the agent via OpenClaw — WITH the task_id so agent can link back
       setTriggering(true);
       try {
         const res = await fetch("/api/trigger-agent", {
@@ -147,6 +148,7 @@ function QuickTaskModal({
             agent_id: agentId,
             task_title: title.trim(),
             task_description: description.trim() || undefined,
+            task_id: taskId,
           }),
         });
         const data = await res.json();
