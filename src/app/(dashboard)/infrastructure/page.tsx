@@ -1115,21 +1115,46 @@ export default function InfrastructurePage() {
               </div>
             )}
 
-            {/* Spend Summary (if OpenRouter has data) */}
-            {(aiCosts.totalDailySpend > 0 || aiCosts.totalWeeklySpend > 0 || aiCosts.totalMonthlySpend > 0) && (
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { label: "Today", value: aiCosts.totalDailySpend },
-                  { label: "This Week", value: aiCosts.totalWeeklySpend },
-                  { label: "This Month", value: aiCosts.totalMonthlySpend },
-                ].map((s) => (
-                  <div key={s.label} className="bg-slate-50 rounded-lg p-3 text-center">
-                    <p className="text-lg font-bold text-navy-500">
-                      ${s.value.toFixed(2)}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">{s.label}</p>
-                  </div>
-                ))}
+            {/* Total Spend Summary */}
+            <div className="grid grid-cols-4 gap-3">
+              <div className="bg-navy-500 rounded-lg p-3 text-center col-span-1">
+                <p className="text-lg font-bold text-white">
+                  ${aiCosts.totalMonthlySpend.toFixed(2)}
+                </p>
+                <p className="text-[10px] text-white/70">Total This Month</p>
+              </div>
+              {[
+                { label: "Today", value: aiCosts.totalDailySpend },
+                { label: "This Week", value: aiCosts.totalWeeklySpend },
+                { label: "This Month", value: aiCosts.totalMonthlySpend },
+              ].map((s) => (
+                <div key={s.label} className="bg-slate-50 rounded-lg p-3 text-center">
+                  <p className="text-lg font-bold text-navy-500">
+                    ${s.value.toFixed(2)}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Per-Provider Spend Breakdown */}
+            {aiCosts.providers.some(p => p.usageMonthly != null && p.usageMonthly > 0) && (
+              <div className="bg-slate-50 rounded-lg p-3">
+                <h3 className="text-[10px] font-semibold text-slate-500 mb-2 uppercase tracking-wide">Spend by Provider</h3>
+                <div className="space-y-1.5">
+                  {aiCosts.providers
+                    .filter(p => p.usageDaily != null || p.usageWeekly != null || p.usageMonthly != null)
+                    .map(p => (
+                      <div key={p.provider} className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-navy-500">{p.provider}</span>
+                        <div className="flex items-center gap-3 text-muted-foreground">
+                          {p.usageDaily != null && <span>${p.usageDaily.toFixed(2)}/day</span>}
+                          {p.usageWeekly != null && <span>${p.usageWeekly.toFixed(2)}/wk</span>}
+                          {p.usageMonthly != null && <span className="font-semibold text-navy-500">${p.usageMonthly.toFixed(2)}/mo</span>}
+                        </div>
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
 
@@ -1204,12 +1229,12 @@ export default function InfrastructurePage() {
                       </div>
                     )}
 
-                    {/* OpenRouter spend breakdown */}
-                    {p.provider === "OpenRouter" && (p.usageDaily != null || p.usageWeekly != null) && (
+                    {/* Spend breakdown (any provider that reports costs) */}
+                    {(p.usageDaily != null || p.usageWeekly != null) && (
                       <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
                         {p.usageDaily != null && <span>${p.usageDaily}/day</span>}
                         {p.usageWeekly != null && <span>${p.usageWeekly}/wk</span>}
-                        {p.usageMonthly != null && <span>${p.usageMonthly}/mo</span>}
+                        {p.usageMonthly != null && <span className="font-semibold">${p.usageMonthly}/mo</span>}
                       </div>
                     )}
 
