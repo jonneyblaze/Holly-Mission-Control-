@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { schedulePost, getProfiles, getQueue, getPostAnalytics } from "@/lib/buffer";
+import {
+  createPost,
+  createPostMultiChannel,
+  getAllChannels,
+  getChannels,
+  getAccount,
+  checkConnection,
+} from "@/lib/buffer";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -7,28 +14,26 @@ export async function GET(request: NextRequest) {
 
   try {
     switch (action) {
-      case "profiles": {
-        const profiles = await getProfiles();
-        return NextResponse.json(profiles);
-      }
-      case "queue": {
-        const profileId = searchParams.get("profileId");
-        if (!profileId) {
-          return NextResponse.json({ error: "profileId required" }, { status: 400 });
+      case "channels": {
+        const orgId = searchParams.get("organizationId");
+        if (orgId) {
+          const channels = await getChannels(orgId);
+          return NextResponse.json({ channels });
         }
-        const queue = await getQueue(profileId);
-        return NextResponse.json(queue);
+        // Get all channels across all orgs
+        const channels = await getAllChannels();
+        return NextResponse.json({ channels });
       }
-      case "analytics": {
-        const updateId = searchParams.get("updateId");
-        if (!updateId) {
-          return NextResponse.json({ error: "updateId required" }, { status: 400 });
-        }
-        const analytics = await getPostAnalytics(updateId);
-        return NextResponse.json(analytics);
+      case "account": {
+        const account = await getAccount();
+        return NextResponse.json(account);
+      }
+      case "health": {
+        const status = await checkConnection();
+        return NextResponse.json(status);
       }
       default:
-        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+        return NextResponse.json({ error: "Invalid action. Use: channels, account, health" }, { status: 400 });
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -39,23 +44,34 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { profileIds, text, scheduledAt, media } = body;
+    const { channelIds, channelId, text, scheduledAt } = body;
 
-    if (!profileIds || !text) {
+    if (!text) {
+      return NextResponse.json({ error: "text is required" }, { status: 400 });
+    }
+
+    // Single channel
+    if (channelId && !channelIds) {
+      const result = await createPost({ channelId, text, scheduledAt });
+      if ("error" in result) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+      return NextResponse.json({ ok: true, post: result }, { status: 201 });
+    }
+
+    // Multiple channels
+    if (channelIds?.length) {
+      const result = await createPostMultiChannel({ channelIds, text, scheduledAt });
       return NextResponse.json(
-        { error: "profileIds and text are required" },
-        { status: 400 }
+        { ok: true, posts: result.posts, errors: result.errors },
+        { status: result.errors.length > 0 ? 207 : 201 }
       );
     }
 
-    const result = await schedulePost({
-      profileIds,
-      text,
-      scheduledAt,
-      media,
-    });
-
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(
+      { error: "channelId or channelIds[] required" },
+      { status: 400 }
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
