@@ -18,6 +18,8 @@ import {
   RefreshCw,
   AlertCircle,
   Zap,
+  Calendar,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, addDays, startOfWeek, isSameDay } from "date-fns";
@@ -36,9 +38,37 @@ interface SocialPost {
   agent_id?: string;
   buffer_id?: string;
   blog_post_id?: string;
+  media_url?: string;
   notes?: string;
   analytics?: { likes?: number; shares?: number; comments?: number; clicks?: number };
   created_at?: string;
+}
+
+// Simple markdown-ish rendering for social post content
+function renderFormattedContent(text: string) {
+  // Split into paragraphs
+  const paragraphs = text.split(/\n\n+/);
+  return paragraphs.map((para, i) => {
+    // Process inline formatting
+    const parts = para.split(/(\*\*[^*]+\*\*)/g);
+    return (
+      <p key={i} className={i > 0 ? "mt-3" : ""}>
+        {parts.map((part, j) => {
+          if (part.startsWith("**") && part.endsWith("**")) {
+            return <strong key={j} className="font-bold text-navy-600">{part.slice(2, -2)}</strong>;
+          }
+          // Handle single newlines within a paragraph
+          const lines = part.split("\n");
+          return lines.map((line, k) => (
+            <span key={`${j}-${k}`}>
+              {k > 0 && <br />}
+              {line}
+            </span>
+          ));
+        })}
+      </p>
+    );
+  });
 }
 
 interface BufferChannel {
@@ -340,6 +370,12 @@ export default function SocialPage() {
                           </button>
                         )}
                       </div>
+                      {post.media_url && (
+                        <div className="rounded overflow-hidden mb-1 -mx-0.5">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={post.media_url} alt="" className="w-full h-12 object-cover rounded" />
+                        </div>
+                      )}
                       <p className="text-[10px] text-navy-500 line-clamp-3 leading-tight">{post.content}</p>
                       {post.agent_id && (
                         <p className="text-[8px] text-muted-foreground mt-1 flex items-center gap-0.5">
@@ -414,15 +450,19 @@ export default function SocialPage() {
       {/* Post Detail / Edit Modal */}
       {showDetail && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            {/* Fixed header */}
+            <div className="flex items-center justify-between p-5 pb-3 border-b border-border/50 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-montserrat font-bold text-navy-500">Post Details</h2>
                 <Badge className={cn("text-xs", statusColors[showDetail.status])}>{showDetail.status}</Badge>
               </div>
-              <button onClick={() => setShowDetail(null)} className="p-1 rounded-lg hover:bg-muted"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowDetail(null)} className="p-1.5 rounded-lg hover:bg-muted transition-colors"><X className="w-4 h-4" /></button>
             </div>
-            <div className="space-y-4">
+
+            {/* Scrollable content */}
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+              {/* Platform + author */}
               <div className="flex items-center gap-2">
                 {(() => {
                   const platform = platformConfig[showDetail.platform];
@@ -441,27 +481,60 @@ export default function SocialPage() {
                 )}
               </div>
 
+              {/* Image / media */}
+              {showDetail.media_url && (
+                <div className="rounded-lg overflow-hidden border border-slate-200">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={showDetail.media_url}
+                    alt="Post media"
+                    className="w-full h-auto max-h-80 object-cover"
+                  />
+                </div>
+              )}
+
+              {/* Formatted content */}
               <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                <p className="text-sm text-navy-500 whitespace-pre-wrap">{showDetail.content}</p>
-                <p className="text-[10px] text-muted-foreground mt-2">
-                  {showDetail.content.length} / {platformConfig[showDetail.platform]?.charLimit || "?"} characters
-                </p>
+                <div className="text-sm text-navy-500 leading-relaxed">
+                  {renderFormattedContent(showDetail.content)}
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-200">
+                  <p className="text-[10px] text-muted-foreground">
+                    {showDetail.content.length} / {platformConfig[showDetail.platform]?.charLimit || "?"} characters
+                  </p>
+                  {showDetail.content.length > (platformConfig[showDetail.platform]?.charLimit || 9999) && (
+                    <p className="text-[10px] text-red-500 font-medium">Over limit!</p>
+                  )}
+                </div>
               </div>
 
-              {showDetail.scheduled_date && (
-                <p className="text-xs text-muted-foreground">
-                  Scheduled: {format(new Date(showDetail.scheduled_date), "EEEE d MMM yyyy")}
-                  {showDetail.scheduled_time && ` at ${showDetail.scheduled_time}`}
-                </p>
-              )}
+              {/* Meta info */}
+              <div className="space-y-2">
+                {showDetail.scheduled_date && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Scheduled: {format(new Date(showDetail.scheduled_date), "EEEE d MMM yyyy")}</span>
+                    {showDetail.scheduled_time && <span>at {showDetail.scheduled_time}</span>}
+                  </div>
+                )}
 
-              {showDetail.blog_post_id && (
-                <p className="text-xs text-muted-foreground">
-                  Linked to blog post: {showDetail.blog_post_id}
-                </p>
-              )}
+                {showDetail.blog_post_id && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Linked to blog post</span>
+                  </div>
+                )}
 
-              {showDetail.analytics && (showDetail.analytics.likes || showDetail.analytics.shares) && (
+                {showDetail.notes && (
+                  <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                    <p className="text-xs font-medium text-amber-800 mb-1">Notes</p>
+                    <p className="text-xs text-amber-700">{showDetail.notes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Analytics */}
+              {showDetail.analytics && (showDetail.analytics.likes || showDetail.analytics.shares || showDetail.analytics.comments || showDetail.analytics.clicks) && (
                 <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
                   <p className="text-xs font-medium text-emerald-800 mb-2">Analytics</p>
                   <div className="grid grid-cols-4 gap-2 text-center">
@@ -488,8 +561,11 @@ export default function SocialPage() {
               {showDetail.buffer_id && (
                 <p className="text-[10px] text-muted-foreground">Buffer ID: {showDetail.buffer_id}</p>
               )}
+            </div>
 
-              <div className="flex gap-2 pt-2">
+            {/* Fixed footer with actions */}
+            <div className="p-5 pt-3 border-t border-border/50 flex-shrink-0">
+              <div className="flex gap-2">
                 {showDetail.status === "draft" && (
                   <>
                     <Button
