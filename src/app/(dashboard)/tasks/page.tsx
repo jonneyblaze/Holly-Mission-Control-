@@ -587,6 +587,120 @@ function AddTaskModal({
   );
 }
 
+// ---------- Clarification Card (inline respond) ----------
+function ClarificationCard({
+  clarification,
+  matchingTask,
+  onResponded,
+  onOpenTask,
+}: {
+  clarification: ClarificationRequest;
+  matchingTask: Task | null;
+  onResponded: () => void;
+  onOpenTask: (task: Task) => void;
+}) {
+  const [response, setResponse] = useState("");
+  const [sending, setSending] = useState(false);
+  const { update: updateActivity } = useMCUpdate("agent_activity");
+  const { update: updateTask } = useMCUpdate("tasks");
+
+  const agentName = agentLabels[clarification.agent_id] || clarification.agent_id;
+
+  const handleRespond = async () => {
+    if (!response.trim()) return;
+    setSending(true);
+    try {
+      // Mark clarification as actioned
+      await updateActivity(clarification.id, { status: "actioned" });
+
+      // If there's a matching task, append the clarification Q&A to description and re-trigger
+      if (matchingTask) {
+        const updatedDesc = [
+          matchingTask.description || "",
+          `\n---\n**${agentName} asked:** ${clarification.full_content || clarification.summary || clarification.title}`,
+          `**Response:** ${response.trim()}`,
+        ].filter(Boolean).join("\n");
+
+        await updateTask(matchingTask.id, {
+          description: updatedDesc,
+          status: "in_progress",
+        });
+
+        // Re-trigger the agent with updated context
+        try {
+          await triggerAgentAPI(
+            clarification.agent_id,
+            matchingTask.id,
+            matchingTask.title,
+            updatedDesc
+          );
+          toast.success(`Response sent — ${agentName} is continuing work`);
+        } catch {
+          toast.warning("Response saved but couldn't re-trigger agent");
+        }
+      } else {
+        // No matching task — just mark as actioned
+        toast.success("Clarification dismissed");
+      }
+
+      onResponded();
+    } catch {
+      toast.error("Failed to send response");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+      <div className="flex items-start gap-3">
+        <div className="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center flex-shrink-0">
+          <MessageCircleQuestion className="w-4 h-4 text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-bold text-amber-900">{agentName}</span>
+            <span className="text-xs text-amber-600">
+              {formatDistanceToNow(new Date(clarification.created_at), { addSuffix: true })}
+            </span>
+            {matchingTask ? (
+              <button
+                onClick={() => onOpenTask(matchingTask)}
+                className="text-xs text-teal-600 hover:text-teal-700 font-medium underline"
+              >
+                View task: {matchingTask.title}
+              </button>
+            ) : (
+              <span className="text-xs text-amber-500 italic">No linked task</span>
+            )}
+          </div>
+          <p className="text-sm text-amber-900 bg-amber-100/60 rounded-lg px-3 py-2 mb-3">
+            {clarification.full_content || clarification.summary || clarification.title}
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={response}
+              onChange={(e) => setResponse(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleRespond()}
+              placeholder="Type your response..."
+              className="flex-1 h-9 px-3 bg-white border border-amber-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+            />
+            <Button
+              onClick={handleRespond}
+              disabled={sending || !response.trim()}
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white h-9 px-4"
+            >
+              {sending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Respond"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Main Page ----------
 export default function TasksPage() {
   const {
@@ -630,7 +744,16 @@ export default function TasksPage() {
     return map;
   }, [clarifications]);
 
-  const totalClarifications = pendingClarifications.size;
+  // Clarifications that have no matching task (orphaned) or ALL clarifications for direct access
+  const allPendingClarifications = useMemo(() => {
+    return clarifications.filter(
+      (c) =>
+        c.activity_type === "clarification" &&
+        c.status !== "actioned"
+    );
+  }, [clarifications]);
+
+  const totalClarifications = allPendingClarifications.length;
 
   const handleDrop = useCallback(
     async (columnId: string) => {
@@ -738,15 +861,18 @@ export default function TasksPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Clarification notification badge */}
+          {/* Clarification notification badge — click scrolls to panel */}
           {totalClarifications > 0 && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl animate-pulse">
+            <button
+              onClick={() => document.getElementById("clarification-panel")?.scrollIntoView({ behavior: "smooth" })}
+              className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl animate-pulse hover:bg-amber-100 transition-colors"
+            >
               <Bell className="w-4 h-4 text-amber-600" />
               <span className="text-sm font-medium text-amber-800">
                 {totalClarifications} agent{totalClarifications > 1 ? "s" : ""}{" "}
-                asking for details
+                asking for details ↓
               </span>
-            </div>
+            </button>
           )}
           <Button
             onClick={() => setShowAddModal(true)}
@@ -757,6 +883,31 @@ export default function TasksPage() {
           </Button>
         </div>
       </div>
+
+      {/* Clarification Panel — shows ALL pending clarifications with inline respond */}
+      {allPendingClarifications.length > 0 && (
+        <div id="clarification-panel" className="space-y-3">
+          <h2 className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+            <MessageCircleQuestion className="w-4 h-4" />
+            Agent Clarification Requests
+          </h2>
+          {allPendingClarifications.map((clar) => {
+            const matchingTask = tasks.find((t) => t.id === clar.metadata?.task_id);
+            return (
+              <ClarificationCard
+                key={clar.id}
+                clarification={clar}
+                matchingTask={matchingTask || null}
+                onResponded={() => {
+                  refetch();
+                  refetchClarifications();
+                }}
+                onOpenTask={(task) => setEditingTask(task)}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

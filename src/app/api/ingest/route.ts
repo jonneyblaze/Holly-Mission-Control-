@@ -40,8 +40,9 @@ export async function POST(request: NextRequest) {
     }
 
     // If the agent references a task_id, auto-update that task to "review"
+    // But NOT for clarification requests — those should leave the task in progress
     const taskId = metadata?.task_id as string | undefined;
-    if (taskId) {
+    if (taskId && activity_type !== "clarification") {
       try {
         const { error: taskError } = await supabase
           .from("tasks")
