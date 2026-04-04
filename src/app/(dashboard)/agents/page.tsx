@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useMCTable, useMCUpdate, useMCInsert } from "@/lib/hooks/use-mission-control";
 import {
@@ -309,6 +309,105 @@ function ActivitySparkline({ activities }: { activities: Activity[] }) {
   );
 }
 
+// ---------- Agent Progress Tracker ----------
+const TASK_PHASES = [
+  { label: "Received", icon: "📥", durationPct: 5 },
+  { label: "Thinking", icon: "🧠", durationPct: 15 },
+  { label: "Researching", icon: "🔍", durationPct: 25 },
+  { label: "Working", icon: "⚡", durationPct: 35 },
+  { label: "Reviewing", icon: "✅", durationPct: 15 },
+  { label: "Posting", icon: "📤", durationPct: 5 },
+];
+
+function AgentProgressTracker({ taskTitle, startedAt }: { taskTitle: string; startedAt: string }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const start = new Date(startedAt).getTime();
+    const update = () => setElapsed(Math.floor((Date.now() - start) / 1000));
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+
+  // Estimate progress: quick tasks ~60s, complex tasks ~180s
+  // Use a logarithmic curve so it feels like it's always moving but slows toward the end
+  const estimatedDuration = 120; // 2 min baseline
+  const rawProgress = Math.min(elapsed / estimatedDuration, 1);
+  // Ease-out curve: fast at start, slow at end, never quite reaches 100%
+  const progress = rawProgress < 0.9
+    ? 1 - Math.pow(1 - rawProgress, 2.5)
+    : 0.9 + (rawProgress - 0.9) * 0.5;
+  const progressPct = Math.min(Math.round(progress * 100), 95); // Never show 100% until actually done
+
+  // Determine current phase
+  let accumulated = 0;
+  let currentPhaseIndex = 0;
+  for (let i = 0; i < TASK_PHASES.length; i++) {
+    accumulated += TASK_PHASES[i].durationPct;
+    if (progressPct <= accumulated) {
+      currentPhaseIndex = i;
+      break;
+    }
+    if (i === TASK_PHASES.length - 1) currentPhaseIndex = i;
+  }
+  // Format elapsed time
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  return (
+    <div className="px-4 py-3 bg-gradient-to-r from-blue-50/80 to-teal-50/80 border-t border-blue-100">
+      {/* Task name + timer */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <CircleDot className="w-3.5 h-3.5 text-blue-500 animate-pulse flex-shrink-0" />
+          <p className="text-xs font-medium text-blue-900 truncate">{taskTitle}</p>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+          <Clock className="w-3 h-3 text-blue-400" />
+          <span className="text-[11px] font-mono font-semibold text-blue-700">{timeStr}</span>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="relative h-2 bg-slate-200 rounded-full overflow-hidden mb-2">
+        <div
+          className="absolute inset-y-0 left-0 bg-gradient-to-r from-teal-400 via-teal-500 to-blue-500 rounded-full transition-all duration-1000 ease-out"
+          style={{ width: `${progressPct}%` }}
+        />
+        {/* Shimmer overlay */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer bg-[length:200%_100%]" />
+      </div>
+
+      {/* Phase indicators */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          {TASK_PHASES.map((phase, i) => (
+            <div
+              key={phase.label}
+              className={cn(
+                "flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium transition-all",
+                i === currentPhaseIndex
+                  ? "bg-teal-100 text-teal-800 scale-105 shadow-sm"
+                  : i < currentPhaseIndex
+                    ? "text-slate-400 line-through"
+                    : "text-slate-300"
+              )}
+            >
+              <span className={cn("text-[10px]", i === currentPhaseIndex && "animate-bounce")} style={{ animationDuration: "1.5s" }}>
+                {phase.icon}
+              </span>
+              <span className="hidden sm:inline">{phase.label}</span>
+            </div>
+          ))}
+        </div>
+        <span className="text-[10px] font-bold text-teal-700">{progressPct}%</span>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Main Component ----------
 export default function AgentsPage() {
   const { data: activities, loading: activitiesLoading } = useMCTable<Activity>("agent_activity", {
@@ -420,6 +519,12 @@ export default function AgentsPage() {
       const reviewTasks = agentTasks.filter((t) => t.status === "review");
       const doneTasks = agentTasks.filter((t) => t.status === "done");
 
+      // Find the most recent trigger for this agent (to track when work started)
+      const lastTrigger = activities.find(
+        (a) => a.agent_id === agent.agentId && (a.activity_type === "trigger" || a.activity_type === "task") && a.status === "pending"
+      );
+      const workStartedAt = currentTask?.created_at || lastTrigger?.created_at;
+
       const timing = getTimingStatus(lastActivityTime);
       const isWorking = !!currentTask || timing.pulse;
       const clarifications = agentClarifications.get(agent.agentId) || [];
@@ -437,6 +542,7 @@ export default function AgentsPage() {
         recentOutputs: agentActivities.slice(0, 3),
         tasksThisWeek: weekActivities.length,
         clarifications,
+        workStartedAt,
       };
     });
 
@@ -624,20 +730,38 @@ export default function AgentsPage() {
                 </div>
               </button>
 
-              {/* Current task + quick summary (always visible) */}
+              {/* Current task with progress tracker */}
               {agent.currentTask && (
-                <div className="px-4 py-2.5 bg-blue-50/50 border-t border-blue-100 flex items-center gap-2">
-                  <CircleDot className="w-3.5 h-3.5 text-blue-500 animate-pulse flex-shrink-0" />
-                  <p className="text-xs font-medium text-blue-800 truncate flex-1">{agent.currentTask.title}</p>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTaskStatusChange(agent.currentTask!.id, "done");
-                    }}
-                    className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded font-medium hover:bg-emerald-200 transition-colors flex-shrink-0"
-                  >
-                    Mark done
-                  </button>
+                <>
+                  <AgentProgressTracker
+                    taskTitle={agent.currentTask.title}
+                    startedAt={agent.workStartedAt || agent.currentTask.created_at}
+                  />
+                  <div className="px-4 py-1.5 bg-blue-50/30 border-t border-blue-100/50 flex items-center justify-end gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTaskStatusChange(agent.currentTask!.id, "done");
+                      }}
+                      className="text-[10px] px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-md font-medium hover:bg-emerald-200 transition-colors flex-shrink-0"
+                    >
+                      ✓ Mark done
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Recent activity indicator when not on a formal task */}
+              {!agent.currentTask && agent.isWorking && agent.timing.pulse && (
+                <div className="px-4 py-2.5 bg-teal-50/50 border-t border-teal-100">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-ping" />
+                    <p className="text-xs text-teal-700">Active just now — processing</p>
+                    <div className="ml-auto flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-teal-400" />
+                      <span className="text-[10px] text-teal-600">{agent.timing.label}</span>
+                    </div>
+                  </div>
                 </div>
               )}
 
