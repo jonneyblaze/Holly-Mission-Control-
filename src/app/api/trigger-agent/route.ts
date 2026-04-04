@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prompt = buildPrompt(agent_id, task_title, task_description, task_id);
+    const prompt = await buildPrompt(agent_id, task_title, task_description, task_id);
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -129,18 +129,80 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function buildPrompt(
+interface FeedbackEntry {
+  action: string;
+  feedback_note: string | null;
+  task_title: string | null;
+  created_at: string;
+}
+
+async function fetchAgentFeedback(agentId: string): Promise<string> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) return "";
+
+  try {
+    const supabase = createClient(supabaseUrl, serviceKey);
+    const { data } = await supabase
+      .from("agent_feedback")
+      .select("action, feedback_note, task_title, created_at")
+      .eq("agent_id", agentId)
+      .order("created_at", { ascending: false })
+      .limit(15);
+
+    if (!data || data.length === 0) return "";
+
+    const entries = data as FeedbackEntry[];
+    const approved = entries.filter((f) => f.action === "approved").length;
+    const rejected = entries.filter((f) => f.action === "rejected").length;
+    const rejections = entries
+      .filter((f) => f.action === "rejected" && f.feedback_note)
+      .slice(0, 5);
+
+    let context = `\n\n--- LEARNING FROM PAST FEEDBACK ---\nYour recent approval rate: ${approved}/${approved + rejected} tasks approved.`;
+
+    if (rejections.length > 0) {
+      context += `\n\nRecent rejections (LEARN from these — do NOT repeat these mistakes):`;
+      for (const r of rejections) {
+        context += `\n• Task "${r.task_title}": ${r.feedback_note}`;
+      }
+    }
+
+    // Also include recent approvals for positive reinforcement
+    const approvals = entries
+      .filter((f) => f.action === "approved" && f.feedback_note)
+      .slice(0, 3);
+
+    if (approvals.length > 0) {
+      context += `\n\nRecent approvals (this is the quality standard to maintain):`;
+      for (const a of approvals) {
+        context += `\n• Task "${a.task_title}"${a.feedback_note ? `: ${a.feedback_note}` : ""}`;
+      }
+    }
+
+    context += `\n--- END FEEDBACK ---\n`;
+    return context;
+  } catch (err) {
+    console.warn("[trigger-agent] Could not fetch feedback:", err);
+    return "";
+  }
+}
+
+async function buildPrompt(
   agentId: string,
   taskTitle: string,
   taskDescription: string | undefined,
   taskId: string | undefined
-): string {
+): Promise<string> {
   const desc = taskDescription ? `\n\nDetails: ${taskDescription}` : "";
   const taskRef = taskId
     ? `\n\nTask ID: ${taskId} — When done, POST your result to Mission Control's /api/ingest endpoint with activity_type "task_complete" (NOT "task") and include this task_id in metadata like: "metadata": {"task_id": "${taskId}"}`
     : "";
 
-  return `TASK ASSIGNED: ${taskTitle}${desc}${taskRef}
+  // Fetch learning context from past feedback
+  const feedbackContext = await fetchAgentFeedback(agentId);
+
+  return `TASK ASSIGNED: ${taskTitle}${desc}${taskRef}${feedbackContext}
 
 Please complete this task now. When finished, POST your result to Mission Control using the curl command from your SOUL.md instructions. Use activity_type "task_complete" and include a title, summary, and full_content with your results. The task will automatically be moved to review.
 

@@ -805,8 +805,8 @@ function ReviewModal({
   task: Task;
   agentOutput: ClarificationRequest[];
   onClose: () => void;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove: (approveNote?: string) => void;
+  onReject: (rejectNote: string) => void;
   onEdit: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -992,18 +992,18 @@ function ReviewModal({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     setRejecting(true);
-                    onReject();
+                    onReject(rejectNote);
                   }
                   if (e.key === "Escape") setShowRejectInput(false);
                 }}
-                placeholder="What needs fixing? (optional)"
+                placeholder="What needs fixing? (required for agent learning)"
                 autoFocus
                 className="flex-1 h-9 px-3 bg-white border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-red-400/30"
               />
               <Button
                 onClick={() => {
                   setRejecting(true);
-                  onReject();
+                  onReject(rejectNote);
                 }}
                 disabled={rejecting}
                 size="sm"
@@ -1039,7 +1039,7 @@ function ReviewModal({
                 className="gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white"
               >
                 {approving ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3.5 h-3.5" />}
-                Approve & Complete
+                Approve ✓
               </Button>
             </>
           )}
@@ -1200,29 +1200,98 @@ export default function TasksPage() {
           task={reviewingTask}
           agentOutput={allActivity}
           onClose={() => setReviewingTask(null)}
-          onApprove={async () => {
+          onApprove={async (approveNote?: string) => {
+            // 1. Mark task as done
             await update(reviewingTask.id, {
               status: "done",
               completed_at: new Date().toISOString(),
             });
-            toast.success("Task approved and completed!");
+
+            // 2. Find agent's output summary for feedback context
+            const completion = allActivity.find(
+              (a) => a.metadata?.task_id === reviewingTask.id &&
+                (a.activity_type === "task_complete" || a.activity_type === "report" || a.activity_type === "content")
+            );
+
+            // 3. Save positive feedback for agent learning
+            if (reviewingTask.assigned_agent) {
+              try {
+                await fetch("/api/agent-feedback", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    task_id: reviewingTask.id,
+                    agent_id: reviewingTask.assigned_agent,
+                    action: "approved",
+                    feedback_note: approveNote || null,
+                    task_title: reviewingTask.title,
+                    task_summary: completion?.summary || null,
+                  }),
+                });
+              } catch (err) {
+                console.warn("Could not save feedback:", err);
+              }
+            }
+
+            toast.success("Task approved — feedback saved for agent learning!");
             setReviewingTask(null);
             refetch();
           }}
-          onReject={async () => {
+          onReject={async (rejectNote: string) => {
+            // 1. Find agent's output summary for feedback context
+            const completion = allActivity.find(
+              (a) => a.metadata?.task_id === reviewingTask.id &&
+                (a.activity_type === "task_complete" || a.activity_type === "report" || a.activity_type === "content")
+            );
+
+            // 2. Count previous rejections for this task to track attempt number
+            const prevRejections = allActivity.filter(
+              (a) => a.metadata?.task_id === reviewingTask.id && a.activity_type === "trigger"
+            ).length;
+
+            // 3. Save rejection feedback for agent learning
+            if (reviewingTask.assigned_agent) {
+              try {
+                await fetch("/api/agent-feedback", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    task_id: reviewingTask.id,
+                    agent_id: reviewingTask.assigned_agent,
+                    action: "rejected",
+                    feedback_note: rejectNote.trim() || "No specific feedback provided",
+                    task_title: reviewingTask.title,
+                    task_summary: completion?.summary || null,
+                    attempt_number: prevRejections + 1,
+                  }),
+                });
+              } catch (err) {
+                console.warn("Could not save feedback:", err);
+              }
+            }
+
+            // 4. Append rejection feedback to task description so agent sees it
+            const feedbackBlock = rejectNote.trim()
+              ? `\n\n---\n**⚠️ REJECTED — Human Feedback (attempt ${prevRejections + 1}):** ${rejectNote.trim()}\nPlease address this feedback and resubmit.`
+              : `\n\n---\n**⚠️ REJECTED (attempt ${prevRejections + 1}):** Work was not satisfactory. Please improve and resubmit.`;
+
+            const updatedDescription = (reviewingTask.description || "") + feedbackBlock;
+
             await update(reviewingTask.id, {
               status: "in_progress",
+              description: updatedDescription,
             });
-            // Re-trigger agent
+
+            // 5. Re-trigger agent with updated description (now includes feedback)
             if (reviewingTask.assigned_agent) {
               try {
                 await triggerAgentAPI(
                   reviewingTask.assigned_agent,
                   reviewingTask.id,
                   reviewingTask.title,
-                  reviewingTask.description || undefined
+                  updatedDescription
                 );
-                toast.success("Sent back — agent is reworking it");
+                toast.success("Sent back with feedback — agent is reworking it");
               } catch {
                 toast.warning("Sent back but couldn't re-trigger agent");
               }
