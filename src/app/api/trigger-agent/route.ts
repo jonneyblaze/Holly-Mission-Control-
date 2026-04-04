@@ -135,10 +135,12 @@ function buildPrompt(
 ): string {
   const desc = taskDescription ? `\n\nDetails: ${taskDescription}` : "";
   const taskRef = taskId
-    ? `\n\nTask ID: ${taskId} — When done, POST your result to Mission Control's /api/ingest endpoint with activity_type "task" and include this task_id in metadata.`
+    ? `\n\nTask ID: ${taskId} — When done, POST your result to Mission Control's /api/ingest endpoint with activity_type "task_complete" (NOT "task") and include this task_id in metadata like: "metadata": {"task_id": "${taskId}"}`
     : "";
 
   return `TASK ASSIGNED: ${taskTitle}${desc}${taskRef}
 
-Please complete this task now. When finished, POST your result to Mission Control using the curl command from your SOUL.md instructions. If you need more information to complete this task, POST a clarification request to Mission Control with activity_type "clarification" and metadata: {"task_id": "${taskId || "unknown"}"} — you may only ask for clarification ONCE.`;
+Please complete this task now. When finished, POST your result to Mission Control using the curl command from your SOUL.md instructions. Use activity_type "task_complete" and include a title, summary, and full_content with your results. The task will automatically be moved to review.
+
+If you need more information to complete this task, POST a clarification request to Mission Control with activity_type "clarification" and metadata: {"task_id": "${taskId || "unknown"}"} — you may only ask for clarification ONCE.`;
 }

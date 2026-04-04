@@ -39,6 +39,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // If the agent references a task_id, auto-update that task to "review"
+    const taskId = metadata?.task_id as string | undefined;
+    if (taskId) {
+      try {
+        const { error: taskError } = await supabase
+          .from("tasks")
+          .update({
+            status: "review",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", taskId)
+          .in("status", ["in_progress", "todo"]); // Only update if still active
+
+        if (taskError) {
+          console.warn(`[ingest] Could not update task ${taskId}:`, taskError.message);
+        } else {
+          console.log(`[ingest] Task ${taskId} moved to review`);
+        }
+      } catch (e) {
+        console.warn("[ingest] Task update failed:", e);
+      }
+    }
+
     // Route to specialised table if applicable
     const specialTable = SPECIAL_TYPES[activity_type];
 

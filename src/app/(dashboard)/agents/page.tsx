@@ -73,9 +73,11 @@ const typeColor: Record<string, string> = {
   infra_snapshot: "bg-teal-100 text-teal-700",
   content: "bg-purple-100 text-purple-700",
   task: "bg-emerald-100 text-emerald-700",
+  task_complete: "bg-emerald-100 text-emerald-700",
   goal_snapshot: "bg-amber-100 text-amber-700",
   kb_gap: "bg-orange-100 text-orange-700",
   clarification: "bg-amber-100 text-amber-700",
+  trigger: "bg-indigo-100 text-indigo-700",
 };
 
 const priorityColor: Record<string, string> = {
@@ -351,7 +353,7 @@ export default function AgentsPage() {
     const weekAgo = new Date(Date.now() - 7 * 24 * 3600000);
 
     const cards = agentRoster.map((agent) => {
-      const agentActivities = activities.filter((a) => a.agent_id === agent.agentId && a.activity_type !== "clarification");
+      const agentActivities = activities.filter((a) => a.agent_id === agent.agentId && a.activity_type !== "clarification" && a.activity_type !== "trigger");
       const weekActivities = agentActivities.filter((a) => new Date(a.created_at) >= weekAgo);
       const lastActivityTime = agentActivities[0]?.created_at;
 
@@ -384,7 +386,7 @@ export default function AgentsPage() {
     return {
       agentCards: cards,
       totalWeek: cards.reduce((sum, a) => sum + a.tasksThisWeek, 0),
-      totalOutputs: activities.filter((a) => a.activity_type !== "clarification").length,
+      totalOutputs: activities.filter((a) => a.activity_type !== "clarification" && a.activity_type !== "trigger").length,
     };
   }, [activities, tasks, agentClarifications]);
 
@@ -787,7 +789,7 @@ export default function AgentsPage() {
             <div className="absolute left-[19px] top-0 bottom-0 w-px bg-border" />
             <div className="space-y-0.5">
               {activities
-                .filter((a) => a.activity_type !== "clarification")
+                .filter((a) => a.activity_type !== "clarification" && a.activity_type !== "trigger")
                 .slice(0, 15)
                 .map((activity, i) => {
                   const agent = agentRoster.find((a) => a.agentId === activity.agent_id);
