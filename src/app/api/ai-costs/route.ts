@@ -196,6 +196,48 @@ async function checkAnthropic(): Promise<ProviderStatus> {
   }
 }
 
+async function checkOllamaViaInfraAgent(): Promise<ProviderStatus | null> {
+  // Fallback: read Ollama status from infra agent's latest snapshot in Mission Control DB
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) return null;
+
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/agent_activity?agent_id=eq.infra&activity_type=eq.ollama_status&order=created_at.desc&limit=1`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+        signal: AbortSignal.timeout(5000),
+      }
+    );
+
+    if (!res.ok) return null;
+
+    const rows = await res.json();
+    if (!rows || rows.length === 0) return null;
+
+    const meta = rows[0].metadata;
+    if (!meta) return null;
+
+    // Check if the snapshot is recent (within 15 minutes)
+    const checkedAt = meta.checked_at ? new Date(meta.checked_at) : new Date(rows[0].created_at);
+    const ageMinutes = (Date.now() - checkedAt.getTime()) / 60_000;
+
+    return {
+      provider: "Ollama (Local)",
+      status: meta.status === "active" ? "active" : "error",
+      error: meta.error || (ageMinutes > 15 ? `Last seen ${Math.round(ageMinutes)}m ago` : undefined),
+      usage: 0,
+      models: Array.isArray(meta.models) ? meta.models.slice(0, 8) : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function checkOllama(): Promise<ProviderStatus> {
   const ollamaUrl = process.env.OLLAMA_URL || "http://10.0.1.100:11434";
 
@@ -205,6 +247,10 @@ async function checkOllama(): Promise<ProviderStatus> {
     });
 
     if (!res.ok) {
+      // Direct fetch failed — try infra agent snapshot
+      const fromAgent = await checkOllamaViaInfraAgent();
+      if (fromAgent) return fromAgent;
+
       return {
         provider: "Ollama (Local)",
         status: "error",
@@ -225,11 +271,15 @@ async function checkOllama(): Promise<ProviderStatus> {
       usage: 0,
       models: models.slice(0, 8),
     };
-  } catch (err) {
+  } catch {
+    // Direct fetch failed (LAN-only) — try infra agent snapshot
+    const fromAgent = await checkOllamaViaInfraAgent();
+    if (fromAgent) return fromAgent;
+
     return {
       provider: "Ollama (Local)",
       status: "error",
-      error: err instanceof Error ? err.message : "Unreachable",
+      error: "LAN-only — waiting for infra agent report",
     };
   }
 }
