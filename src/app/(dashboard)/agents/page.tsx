@@ -28,16 +28,17 @@ import { ViewOutputButton } from "@/components/dashboard/ContentModal";
 
 // ---------- Agent roster ----------
 const agentRoster = [
-  { name: "Holly", emoji: "📋", model: "Claude Sonnet", agentId: "holly", role: "Executive PA & Orchestrator" },
-  { name: "Social", emoji: "📱", model: "Gemini Flash", agentId: "bl-social", role: "Social media content" },
-  { name: "Community", emoji: "🤝", model: "Gemini Flash", agentId: "bl-community", role: "Community engagement" },
-  { name: "Marketing", emoji: "📈", model: "Claude Sonnet", agentId: "bl-marketing", role: "Blog, SEO, email copy" },
-  { name: "Content", emoji: "✍️", model: "Claude Sonnet", agentId: "bl-content", role: "Course lessons & quizzes" },
-  { name: "Duracell Prep", emoji: "💼", model: "Claude Sonnet", agentId: "duracell-prep", role: "Career prep & plans" },
-  { name: "Support", emoji: "🎧", model: "Gemini Flash", agentId: "bl-support", role: "Ticket replies & KB" },
-  { name: "QA", emoji: "🧪", model: "Claude Haiku", agentId: "bl-qa", role: "Testing & quality checks" },
-  { name: "Infra", emoji: "🏗️", model: "Claude Sonnet", agentId: "infra", role: "Server health & Docker" },
-  { name: "DevOps", emoji: "⚙️", model: "Claude Sonnet", agentId: "devops", role: "CI/CD & deployments" },
+  { name: "Holly", emoji: "📋", model: "Gemini 2.5 Flash", agentId: "holly", role: "Executive PA & Orchestrator" },
+  { name: "Social", emoji: "📱", model: "Gemini 2.5 Flash", agentId: "bl-social", role: "Social media content" },
+  { name: "Community", emoji: "🤝", model: "Gemini 2.5 Flash", agentId: "bl-community", role: "Community engagement" },
+  { name: "Marketing", emoji: "📈", model: "Gemini 2.5 Pro", agentId: "bl-marketing", role: "Blog, SEO, email copy" },
+  { name: "Content", emoji: "✍️", model: "Gemini 2.5 Pro", agentId: "bl-content", role: "Course lessons & quizzes" },
+  { name: "Duracell Prep", emoji: "💼", model: "Gemini 2.5 Pro", agentId: "duracell-prep", role: "Career prep & plans" },
+  { name: "Support", emoji: "🎧", model: "Gemini 2.5 Flash", agentId: "bl-support", role: "Ticket replies & KB" },
+  { name: "QA", emoji: "🧪", model: "Gemini 2.5 Flash", agentId: "bl-qa", role: "Testing & quality checks" },
+  { name: "Infra", emoji: "🏗️", model: "DeepSeek V3", agentId: "infra", role: "Server health & Docker" },
+  { name: "DevOps", emoji: "⚙️", model: "DeepSeek V3", agentId: "devops", role: "CI/CD & deployments" },
+  { name: "Private", emoji: "🔒", model: "Qwen 2.5 32B (Ollama)", agentId: "private", role: "Local private assistant" },
 ];
 
 // ---------- Types ----------
