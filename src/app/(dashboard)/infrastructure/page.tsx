@@ -27,6 +27,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
+import { ViewOutputButton } from "@/components/dashboard/ContentModal";
 
 // ---------- Types ----------
 interface Container {
@@ -732,14 +733,16 @@ export default function InfrastructurePage() {
                       </div>
                       <p className="text-xs text-muted-foreground">{report.summary}</p>
                       {report.full_content && (
-                        <details className="mt-2">
-                          <summary className="text-[10px] text-teal-600 cursor-pointer hover:text-teal-700 font-medium">
-                            View full report
-                          </summary>
-                          <pre className="mt-2 text-[11px] text-navy-400 whitespace-pre-wrap bg-slate-50 rounded-lg p-3 max-h-60 overflow-y-auto">
-                            {report.full_content}
-                          </pre>
-                        </details>
+                        <ViewOutputButton
+                          content={report.full_content}
+                          title={report.title}
+                          summary={report.summary}
+                          badge={report.activity_type}
+                          emoji="🏗️"
+                          subtitle="Infra Agent"
+                          label="View full report"
+                          className="mt-2 text-[10px]"
+                        />
                       )}
                     </div>
                     <div className="flex items-center gap-1 text-[10px] text-muted-foreground flex-shrink-0">

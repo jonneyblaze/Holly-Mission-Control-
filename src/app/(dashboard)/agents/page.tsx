@@ -24,6 +24,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import { toast } from "sonner";
+import { ViewOutputButton } from "@/components/dashboard/ContentModal";
 
 // ---------- Agent roster ----------
 const agentRoster = [
@@ -726,14 +727,13 @@ export default function AgentsPage() {
                                 <p className="text-[11px] text-muted-foreground mt-0.5">{output.summary}</p>
                               )}
                               {output.full_content && (
-                                <details className="mt-1.5">
-                                  <summary className="text-[10px] text-teal-600 cursor-pointer hover:text-teal-700 font-medium">
-                                    View full output
-                                  </summary>
-                                  <pre className="mt-1 text-[10px] text-navy-400 whitespace-pre-wrap bg-slate-50 rounded p-2 max-h-40 overflow-y-auto">
-                                    {output.full_content}
-                                  </pre>
-                                </details>
+                                <ViewOutputButton
+                                  content={output.full_content}
+                                  title={output.title}
+                                  summary={output.summary}
+                                  badge={output.activity_type.replace(/_/g, " ")}
+                                  className="mt-1.5 text-[10px]"
+                                />
                               )}
                             </div>
                           );
@@ -818,14 +818,15 @@ export default function AgentsPage() {
                           <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{activity.summary}</p>
                         )}
                         {activity.full_content && (
-                          <details className="mt-1">
-                            <summary className="text-[11px] text-teal-600 cursor-pointer hover:text-teal-700 font-medium">
-                              View full output
-                            </summary>
-                            <pre className="mt-1 text-[11px] text-navy-400 whitespace-pre-wrap bg-white rounded-lg p-3 max-h-48 overflow-y-auto border border-border/50">
-                              {activity.full_content}
-                            </pre>
-                          </details>
+                          <ViewOutputButton
+                            content={activity.full_content}
+                            title={activity.title}
+                            summary={activity.summary}
+                            badge={activity.activity_type.replace(/_/g, " ")}
+                            emoji={agent?.emoji || "🤖"}
+                            subtitle={agent?.name || activity.agent_id}
+                            className="mt-1"
+                          />
                         )}
                       </div>
                       <div className="flex items-center gap-1 text-[10px] text-muted-foreground flex-shrink-0 pt-0.5">
