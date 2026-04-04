@@ -331,14 +331,16 @@ function AgentProgressTracker({ taskTitle, startedAt }: { taskTitle: string; sta
   }, [startedAt]);
 
   // Estimate progress: quick tasks ~60s, complex tasks ~180s
-  // Use a logarithmic curve so it feels like it's always moving but slows toward the end
   const estimatedDuration = 120; // 2 min baseline
   const rawProgress = Math.min(elapsed / estimatedDuration, 1);
   // Ease-out curve: fast at start, slow at end, never quite reaches 100%
   const progress = rawProgress < 0.9
     ? 1 - Math.pow(1 - rawProgress, 2.5)
     : 0.9 + (rawProgress - 0.9) * 0.5;
-  const progressPct = Math.min(Math.round(progress * 100), 95); // Never show 100% until actually done
+  const progressPct = Math.min(Math.round(progress * 100), 95);
+
+  const isStuck = elapsed > 15 * 60; // 15 minutes
+  const isSlowing = elapsed > 5 * 60 && !isStuck; // 5 minutes
 
   // Determine current phase
   let accumulated = 0;
@@ -358,26 +360,49 @@ function AgentProgressTracker({ taskTitle, startedAt }: { taskTitle: string; sta
 
   return (
     <div className="px-4 py-3 bg-gradient-to-r from-blue-50/80 to-teal-50/80 border-t border-blue-100">
+      {/* Stuck warning */}
+      {isStuck && (
+        <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-red-100 rounded-lg">
+          <AlertTriangle className="w-3.5 h-3.5 text-red-600 animate-pulse" />
+          <span className="text-[11px] font-bold text-red-700">Task appears stuck — no response for {mins}m</span>
+        </div>
+      )}
+      {isSlowing && !isStuck && (
+        <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-amber-50 rounded-lg">
+          <Clock className="w-3.5 h-3.5 text-amber-600" />
+          <span className="text-[11px] font-medium text-amber-700">Taking longer than expected — {mins}m elapsed</span>
+        </div>
+      )}
+
       {/* Task name + timer */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2 min-w-0">
-          <CircleDot className="w-3.5 h-3.5 text-blue-500 animate-pulse flex-shrink-0" />
-          <p className="text-xs font-medium text-blue-900 truncate">{taskTitle}</p>
+          <CircleDot className={cn("w-3.5 h-3.5 flex-shrink-0", isStuck ? "text-red-500" : "text-blue-500 animate-pulse")} />
+          <p className={cn("text-xs font-medium truncate", isStuck ? "text-red-900" : "text-blue-900")}>{taskTitle}</p>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
-          <Clock className="w-3 h-3 text-blue-400" />
-          <span className="text-[11px] font-mono font-semibold text-blue-700">{timeStr}</span>
+          <Clock className={cn("w-3 h-3", isStuck ? "text-red-400" : isSlowing ? "text-amber-400" : "text-blue-400")} />
+          <span className={cn("text-[11px] font-mono font-semibold", isStuck ? "text-red-700" : isSlowing ? "text-amber-700" : "text-blue-700")}>{timeStr}</span>
         </div>
       </div>
 
       {/* Progress bar */}
       <div className="relative h-2 bg-slate-200 rounded-full overflow-hidden mb-2">
         <div
-          className="absolute inset-y-0 left-0 bg-gradient-to-r from-teal-400 via-teal-500 to-blue-500 rounded-full transition-all duration-1000 ease-out"
+          className={cn(
+            "absolute inset-y-0 left-0 rounded-full transition-all duration-1000 ease-out",
+            isStuck
+              ? "bg-gradient-to-r from-red-400 via-red-500 to-red-400"
+              : isSlowing
+                ? "bg-gradient-to-r from-amber-400 via-amber-500 to-amber-400"
+                : "bg-gradient-to-r from-teal-400 via-teal-500 to-blue-500"
+          )}
           style={{ width: `${progressPct}%` }}
         />
         {/* Shimmer overlay */}
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer bg-[length:200%_100%]" />
+        {!isStuck && (
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer bg-[length:200%_100%]" />
+        )}
       </div>
 
       {/* Phase indicators */}
@@ -402,7 +427,7 @@ function AgentProgressTracker({ taskTitle, startedAt }: { taskTitle: string; sta
             </div>
           ))}
         </div>
-        <span className="text-[10px] font-bold text-teal-700">{progressPct}%</span>
+        <span className={cn("text-[10px] font-bold", isStuck ? "text-red-700" : isSlowing ? "text-amber-700" : "text-teal-700")}>{progressPct}%</span>
       </div>
     </div>
   );
@@ -556,6 +581,55 @@ export default function AgentsPage() {
   const totalClarifications = pendingClarifications.size;
   const unassignedTasks = tasks.filter((t) => !t.assigned_agent && t.status !== "done");
 
+  // Stuck task detection: in_progress for more than 15 minutes
+  const stuckTasks = useMemo(() => {
+    const STUCK_MINS = 15;
+    const cutoff = Date.now() - STUCK_MINS * 60 * 1000;
+    return tasks.filter((t) => {
+      if (t.status !== "in_progress" || !t.assigned_agent) return false;
+      const updatedAt = new Date(t.created_at).getTime();
+      return updatedAt < cutoff;
+    });
+  }, [tasks]);
+
+  const [retryingTask, setRetryingTask] = useState<string | null>(null);
+
+  const retryStuckTask = useCallback(async (task: Task) => {
+    if (!task.assigned_agent) return;
+    setRetryingTask(task.id);
+    try {
+      const res = await fetch("/api/trigger-agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${INGEST_KEY}`,
+        },
+        body: JSON.stringify({
+          agent_id: task.assigned_agent,
+          task_title: task.title,
+          task_description: task.description || undefined,
+          task_id: task.id,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        toast.success(`Retried ${task.title} — agent notified`);
+      } else {
+        toast.error(`Retry failed: ${data.error}`);
+      }
+    } catch {
+      toast.error("Failed to retry task");
+    } finally {
+      setRetryingTask(null);
+    }
+  }, []);
+
+  const cancelStuckTask = useCallback(async (taskId: string) => {
+    await updateTask(taskId, { status: "todo", assigned_agent: null });
+    refetchTasks();
+    toast.success("Task unassigned and moved back to To Do");
+  }, [updateTask, refetchTasks]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -614,6 +688,73 @@ export default function AgentsPage() {
             </p>
           </div>
         </Link>
+      )}
+
+      {/* Stuck Tasks Panel */}
+      {stuckTasks.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 bg-red-100/60 border-b border-red-200 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-600" />
+            <h3 className="text-sm font-bold text-red-800">
+              {stuckTasks.length} Stuck Task{stuckTasks.length > 1 ? "s" : ""}
+            </h3>
+            <span className="text-xs text-red-600 ml-1">— in progress for 15+ minutes with no response</span>
+          </div>
+          <div className="divide-y divide-red-100">
+            {stuckTasks.map((task) => {
+              const agent = agentRoster.find((a) => a.agentId === task.assigned_agent);
+              const minsStuck = Math.round((Date.now() - new Date(task.created_at).getTime()) / 60000);
+              const isRetrying = retryingTask === task.id;
+
+              return (
+                <div key={task.id} className="px-4 py-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center text-sm flex-shrink-0">
+                    {agent?.emoji || "❓"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-red-900 truncate">{task.title}</p>
+                    <p className="text-xs text-red-600">
+                      Assigned to <span className="font-semibold">{agent?.name || task.assigned_agent}</span> · stuck for {minsStuck}m
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => retryStuckTask(task)}
+                      disabled={isRetrying}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-100 text-amber-800 text-xs font-medium rounded-lg hover:bg-amber-200 disabled:opacity-50 transition-colors"
+                    >
+                      {isRetrying ? <Loader2 className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                      Retry
+                    </button>
+                    <button
+                      onClick={() => {
+                        const newAgent = prompt(`Reassign to which agent? (${agentRoster.map(a => a.agentId).join(", ")})`);
+                        if (newAgent && agentRoster.some(a => a.agentId === newAgent)) {
+                          updateTask(task.id, { assigned_agent: newAgent }).then(() => {
+                            refetchTasks();
+                            retryStuckTask({ ...task, assigned_agent: newAgent });
+                            toast.success(`Reassigned to ${newAgent}`);
+                          });
+                        }
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-100 text-blue-800 text-xs font-medium rounded-lg hover:bg-blue-200 transition-colors"
+                    >
+                      <ArrowRight className="w-3 h-3" />
+                      Reassign
+                    </button>
+                    <button
+                      onClick={() => cancelStuckTask(task.id)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg hover:bg-red-200 transition-colors"
+                    >
+                      <X className="w-3 h-3" />
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Agent Cards Grid */}
