@@ -29,6 +29,10 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${OPENCLAW_TOKEN}`,
         "x-openclaw-agent-id": agent_id,
         "x-openclaw-session-key": `mission-control-chat-${agent_id}`,
+        ...(process.env.CF_ACCESS_CLIENT_ID && {
+          "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
+          "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET || "",
+        }),
       },
       body: JSON.stringify({
         model: `openclaw:${agent_id}`,

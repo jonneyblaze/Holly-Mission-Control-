@@ -39,6 +39,10 @@ export async function POST(request: NextRequest) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${OPENCLAW_TOKEN}`,
           "x-openclaw-agent-id": agent_id,
+          ...(process.env.CF_ACCESS_CLIENT_ID && {
+            "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
+            "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET || "",
+          }),
         },
         body: JSON.stringify({
           model: `openclaw:${agent_id}`,
