@@ -129,8 +129,20 @@ export async function createPost(params: {
   text: string;
   scheduledAt?: string; // ISO datetime
 }): Promise<BufferPost | { error: string }> {
-  // Use customScheduled mode with dueAt if a date is provided, otherwise automatic
   const hasSchedule = !!params.scheduledAt;
+
+  // mode: customScheduled requires dueAt, addToQueue lets Buffer pick the time
+  const input: Record<string, unknown> = {
+    channelId: params.channelId,
+    text: params.text,
+    mode: hasSchedule ? "customScheduled" : "addToQueue",
+  };
+
+  if (hasSchedule) {
+    input.dueAt = params.scheduledAt;
+  }
+
+  console.log("[buffer] createPost input:", JSON.stringify(input));
 
   const data = await bufferQuery<{
     createPost:
@@ -140,6 +152,7 @@ export async function createPost(params: {
     `
     mutation CreatePost($input: CreatePostInput!) {
       createPost(input: $input) {
+        __typename
         ... on PostActionSuccess {
           post {
             id
@@ -152,22 +165,17 @@ export async function createPost(params: {
       }
     }
   `,
-    {
-      input: {
-        channelId: params.channelId,
-        text: params.text,
-        schedulingType: "automatic",
-        mode: hasSchedule ? "customScheduled" : "customScheduled",
-        ...(params.scheduledAt && { dueAt: params.scheduledAt }),
-      },
-    }
+    { input }
   );
 
   const result = data.createPost;
-  if ("message" in result) {
-    return { error: result.message };
+  console.log("[buffer] createPost result:", JSON.stringify(result));
+
+  if (result.__typename === "MutationError" || "message" in result) {
+    const errMsg = "message" in result ? String(result.message) : "Unknown mutation error";
+    return { error: errMsg };
   }
-  return result.post;
+  return (result as { __typename: "PostActionSuccess"; post: BufferPost }).post;
 }
 
 // Schedule to multiple channels

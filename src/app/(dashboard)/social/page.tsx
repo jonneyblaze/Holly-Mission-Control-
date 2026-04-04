@@ -173,8 +173,8 @@ export default function SocialPage() {
             }),
           });
 
+          const result = await res.json();
           if (res.ok) {
-            const result = await res.json();
             const bufferId = result.post?.id;
             await update(post.id, {
               status: "scheduled",
@@ -183,7 +183,8 @@ export default function SocialPage() {
             });
             toast.success(`Approved & scheduled to ${platformConfig[post.platform]?.label || post.platform} via Buffer`);
           } else {
-            toast.success("Approved — Buffer scheduling failed, will retry");
+            const errMsg = result.error || `HTTP ${res.status}`;
+            toast.error(`Buffer scheduling failed: ${errMsg}`);
           }
         } catch {
           toast.success("Approved — Buffer not reachable, post saved");
