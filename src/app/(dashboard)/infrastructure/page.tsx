@@ -1231,6 +1231,58 @@ export default function InfrastructurePage() {
               })}
             </div>
 
+            {/* Fallback Chain Table */}
+            <div className="bg-slate-50 rounded-lg p-4">
+              <h3 className="text-xs font-semibold text-navy-500 mb-3">Provider Hierarchy &amp; Fallback Chain</h3>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="text-left py-1.5 pr-3 font-semibold text-slate-500">Priority</th>
+                    <th className="text-left py-1.5 pr-3 font-semibold text-slate-500">Provider</th>
+                    <th className="text-left py-1.5 pr-3 font-semibold text-slate-500">Role</th>
+                    <th className="text-left py-1.5 pr-3 font-semibold text-slate-500">Cost</th>
+                    <th className="text-left py-1.5 font-semibold text-slate-500">Models</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  <tr>
+                    <td className="py-1.5 pr-3"><span className="bg-teal-100 text-teal-700 text-[10px] font-bold px-1.5 py-0.5 rounded">1</span></td>
+                    <td className="py-1.5 pr-3 font-medium text-navy-500">OpenRouter</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Agent primary</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Pay-per-token (cheapest)</td>
+                    <td className="py-1.5 text-muted-foreground">Gemini 2.5 Flash/Pro, DeepSeek V3</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3"><span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded">2</span></td>
+                    <td className="py-1.5 pr-3 font-medium text-navy-500">OpenAI</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Gateway + fallback</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Pay-per-token</td>
+                    <td className="py-1.5 text-muted-foreground">gpt-4.1-mini (gateway), gpt-4.1, o4-mini</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3"><span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded">3</span></td>
+                    <td className="py-1.5 pr-3 font-medium text-navy-500">Anthropic</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Standby (key expired)</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Pay-per-token (most expensive)</td>
+                    <td className="py-1.5 text-muted-foreground">Claude Opus 4, Sonnet 4, Haiku 4</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 pr-3"><span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">4</span></td>
+                    <td className="py-1.5 pr-3 font-medium text-navy-500">Ollama (Local)</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Free fallback + bulk + private</td>
+                    <td className="py-1.5 pr-3 font-medium text-emerald-600">$0 forever</td>
+                    <td className="py-1.5 text-muted-foreground">qwen2.5:32b/7b, llama3.2:3b, nomic-embed, llava</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div className="mt-3 pt-2 border-t border-slate-200">
+                <p className="text-[10px] text-muted-foreground">
+                  <span className="font-semibold text-navy-500">Agent chain:</span> OpenRouter → OpenAI → DeepSeek → Ollama &nbsp;|&nbsp;
+                  <span className="font-semibold text-navy-500">Gateway chain:</span> OpenAI → OpenAI (premium) → OpenRouter → Ollama
+                </p>
+              </div>
+            </div>
+
             {/* Last checked */}
             <p className="text-[10px] text-muted-foreground text-right">
               Last checked: {format(new Date(aiCosts.fetchedAt), "HH:mm:ss")}
