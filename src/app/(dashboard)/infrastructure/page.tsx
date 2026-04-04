@@ -5,7 +5,6 @@ import { useMCTable } from "@/lib/hooks/use-mission-control";
 import {
   Server,
   HardDrive,
-  Cpu,
   CircuitBoard,
   AlertTriangle,
   CheckCircle2,
