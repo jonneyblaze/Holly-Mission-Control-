@@ -104,7 +104,7 @@ export default function DashboardPage() {
 
   // Connection status
   const isLive = activities.length > 0 || !!blDashboard;
-  const isLoading = activitiesLoading && blLoading;
+  const isLoading = activitiesLoading || blLoading;
 
   // BodyLytics metrics
   const revenue = blDashboard?.total_revenue ?? 0;

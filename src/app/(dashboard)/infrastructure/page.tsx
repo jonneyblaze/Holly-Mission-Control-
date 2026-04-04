@@ -29,6 +29,8 @@ import {
   ExternalLink,
   GitBranch,
   Zap,
+  DollarSign,
+  Brain,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ViewOutputButton } from "@/components/dashboard/ContentModal";
@@ -154,6 +156,30 @@ interface CloudStatus {
     bodylytics: CloudSubProject | null;
   };
   uptime: CloudSubProject[];
+}
+
+// ---------- AI Cost Types ----------
+interface AIProviderStatus {
+  provider: string;
+  status: "active" | "error" | "no_key" | "limit_exceeded";
+  error?: string;
+  usage?: number;
+  limit?: number;
+  remaining?: number;
+  usageDaily?: number;
+  usageWeekly?: number;
+  usageMonthly?: number;
+  percentUsed?: number;
+  models?: string[];
+}
+
+interface AICostData {
+  providers: AIProviderStatus[];
+  totalDailySpend: number;
+  totalWeeklySpend: number;
+  totalMonthlySpend: number;
+  warnings: string[];
+  fetchedAt: string;
 }
 
 // ---------- Gauge Component ----------
@@ -441,6 +467,8 @@ export default function InfrastructurePage() {
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
   const [cloudLoading, setCloudLoading] = useState(true);
   const [cloudError, setCloudError] = useState<string | null>(null);
+  const [aiCosts, setAiCosts] = useState<AICostData | null>(null);
+  const [aiCostsLoading, setAiCostsLoading] = useState(true);
 
   const fetchCloudStatus = useCallback(async () => {
     try {
@@ -457,11 +485,30 @@ export default function InfrastructurePage() {
     }
   }, []);
 
+  const fetchAiCosts = useCallback(async () => {
+    try {
+      setAiCostsLoading(true);
+      const resp = await fetch("/api/ai-costs");
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      setAiCosts(data);
+    } catch {
+      // silently fail — section just won't render
+    } finally {
+      setAiCostsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchCloudStatus();
-    const interval = setInterval(fetchCloudStatus, 120_000); // Refresh every 2 min
-    return () => clearInterval(interval);
-  }, [fetchCloudStatus]);
+    fetchAiCosts();
+    const cloudInterval = setInterval(fetchCloudStatus, 120_000); // Refresh every 2 min
+    const aiInterval = setInterval(fetchAiCosts, 120_000); // Refresh every 2 min
+    return () => {
+      clearInterval(cloudInterval);
+      clearInterval(aiInterval);
+    };
+  }, [fetchCloudStatus, fetchAiCosts]);
 
   // Structured snapshots
   const { data: snapshots, loading: snapshotsLoading } = useMCTable<InfraSnapshot>("infra_snapshots", {
@@ -1018,6 +1065,183 @@ export default function InfrastructurePage() {
             </p>
           </div>
         ) : null}
+      </div>
+
+      {/* ==================== AI Provider Status ==================== */}
+      <div className="bg-white rounded-xl border border-border p-6">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-sm font-semibold text-navy-500 flex items-center gap-2">
+            <Brain className="w-4 h-4 text-teal-600" />
+            AI Providers
+          </h2>
+          <div className="flex items-center gap-2">
+            {aiCosts && aiCosts.warnings.length === 0 && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">
+                All Providers Healthy
+              </span>
+            )}
+            {aiCosts && aiCosts.warnings.length > 0 && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">
+                {aiCosts.warnings.length} Warning{aiCosts.warnings.length > 1 ? "s" : ""}
+              </span>
+            )}
+            <button
+              onClick={fetchAiCosts}
+              disabled={aiCostsLoading}
+              className="text-muted-foreground hover:text-navy-500 transition-colors"
+              title="Refresh AI provider status"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", aiCostsLoading && "animate-spin")} />
+            </button>
+          </div>
+        </div>
+
+        {aiCostsLoading && !aiCosts ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 text-teal-500 animate-spin" />
+            <span className="text-xs text-muted-foreground ml-2">Checking AI providers...</span>
+          </div>
+        ) : aiCosts ? (
+          <div className="space-y-5">
+            {/* Warnings Banner */}
+            {aiCosts.warnings.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                {aiCosts.warnings.map((w, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs text-amber-700">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{w}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Spend Summary (if OpenRouter has data) */}
+            {(aiCosts.totalDailySpend > 0 || aiCosts.totalWeeklySpend > 0 || aiCosts.totalMonthlySpend > 0) && (
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: "Today", value: aiCosts.totalDailySpend },
+                  { label: "This Week", value: aiCosts.totalWeeklySpend },
+                  { label: "This Month", value: aiCosts.totalMonthlySpend },
+                ].map((s) => (
+                  <div key={s.label} className="bg-slate-50 rounded-lg p-3 text-center">
+                    <p className="text-lg font-bold text-navy-500">
+                      ${s.value.toFixed(2)}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Provider Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {aiCosts.providers.map((p) => {
+                const statusColor =
+                  p.status === "active" ? "border-emerald-200 bg-emerald-50/30" :
+                  p.status === "error" ? "border-amber-200 bg-amber-50/30" :
+                  p.status === "limit_exceeded" ? "border-red-200 bg-red-50/30" :
+                  "border-slate-200 bg-slate-50/50";
+
+                const statusDot =
+                  p.status === "active" ? "bg-emerald-500" :
+                  p.status === "error" ? "bg-amber-500" :
+                  p.status === "limit_exceeded" ? "bg-red-500" :
+                  "bg-slate-400";
+
+                const statusLabel =
+                  p.status === "active" ? "Active" :
+                  p.status === "error" ? "Error" :
+                  p.status === "limit_exceeded" ? "Limit Exceeded" :
+                  "No Key";
+
+                return (
+                  <div key={p.provider} className={cn("rounded-lg border p-3.5 transition-all", statusColor)}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-navy-500">{p.provider}</span>
+                      <div className="flex items-center gap-1.5">
+                        <div className={cn("w-2 h-2 rounded-full", statusDot)} />
+                        <span className={cn(
+                          "text-[10px] font-medium",
+                          p.status === "active" ? "text-emerald-600" :
+                          p.status === "error" ? "text-amber-600" :
+                          p.status === "limit_exceeded" ? "text-red-600" :
+                          "text-slate-500"
+                        )}>
+                          {statusLabel}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Error message */}
+                    {p.error && (
+                      <p className="text-[10px] text-red-600 mb-1.5">{p.error}</p>
+                    )}
+
+                    {/* OpenRouter usage bar */}
+                    {p.provider === "OpenRouter" && p.usage != null && p.limit != null && p.limit > 0 && (
+                      <div className="mb-2">
+                        <div className="flex items-center justify-between text-[10px] mb-0.5">
+                          <span className="text-muted-foreground">
+                            ${p.usage} / ${p.limit}
+                          </span>
+                          <span className="font-medium text-navy-500">{p.percentUsed}%</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div
+                            className={cn("h-full rounded-full transition-all duration-500",
+                              (p.percentUsed ?? 0) > 90 ? "bg-red-500" :
+                              (p.percentUsed ?? 0) > 70 ? "bg-amber-500" :
+                              "bg-teal-500"
+                            )}
+                            style={{ width: `${Math.min(100, p.percentUsed ?? 0)}%` }}
+                          />
+                        </div>
+                        {p.remaining != null && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            ${p.remaining} remaining
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* OpenRouter spend breakdown */}
+                    {p.provider === "OpenRouter" && (p.usageDaily != null || p.usageWeekly != null) && (
+                      <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                        {p.usageDaily != null && <span>${p.usageDaily}/day</span>}
+                        {p.usageWeekly != null && <span>${p.usageWeekly}/wk</span>}
+                        {p.usageMonthly != null && <span>${p.usageMonthly}/mo</span>}
+                      </div>
+                    )}
+
+                    {/* Models list */}
+                    {p.models && p.models.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {p.models.map((m) => (
+                          <span
+                            key={m}
+                            className="text-[9px] bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-600"
+                          >
+                            {m}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Last checked */}
+            <p className="text-[10px] text-muted-foreground text-right">
+              Last checked: {format(new Date(aiCosts.fetchedAt), "HH:mm:ss")}
+            </p>
+          </div>
+        ) : (
+          <div className="text-center py-6">
+            <DollarSign className="w-6 h-6 text-slate-300 mx-auto mb-2" />
+            <p className="text-xs text-muted-foreground">Set API keys in env vars to monitor provider health</p>
+          </div>
+        )}
       </div>
 
       {/* Prometheus Charts */}

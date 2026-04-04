@@ -24,7 +24,7 @@ AGENTS_DIR="$SCRIPT_DIR/../agents"
 BACKUP_DIR="/mnt/user/appdata/openclaw/backups/$(date +%Y%m%d-%H%M%S)"
 DRY_RUN=false
 SKIP_RESTART=false
-CONTAINER_NAME="openclaw"
+CONTAINER_NAME="OpenClaw"
 
 # Parse flags
 for arg in "$@"; do

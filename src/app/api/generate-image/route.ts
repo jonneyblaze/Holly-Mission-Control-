@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // AI Image generation via Pollinations.ai (free, no API key needed)
-// Also supports Unsplash for stock photos as fallback
 
 const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, style, width, height, type } = body;
+    const { prompt, style, width, height } = body;
 
     if (!prompt) {
       return NextResponse.json({ error: "prompt is required" }, { status: 400 });
@@ -21,32 +20,9 @@ export async function POST(request: NextRequest) {
     const stylePrefix = style || "professional, modern, clean";
     const enhancedPrompt = `${stylePrefix}, ${prompt}, high quality, editorial style, no text overlay`;
 
-    if (type === "unsplash") {
-      // Use Unsplash Source for stock photos (no API key needed)
-      const unsplashUrl = `https://source.unsplash.com/${w}x${h}/?${encodeURIComponent(prompt)}`;
-      return NextResponse.json({
-        url: unsplashUrl,
-        source: "unsplash",
-        prompt,
-      });
-    }
-
-    // Default: Pollinations.ai (AI-generated)
+    // Pollinations.ai generates on-demand — the URL itself IS the image
+    // No need to pre-check with HEAD (it's slow and causes timeouts on serverless)
     const imageUrl = `${POLLINATIONS_BASE}/${encodeURIComponent(enhancedPrompt)}?width=${w}&height=${h}&nologo=true&seed=${Date.now()}`;
-
-    // Verify the image is accessible
-    try {
-      const check = await fetch(imageUrl, { method: "HEAD", redirect: "follow" });
-      if (!check.ok) throw new Error("Image generation failed");
-    } catch {
-      // Fallback to Unsplash if Pollinations fails
-      const fallbackUrl = `https://source.unsplash.com/${w}x${h}/?${encodeURIComponent(prompt)}`;
-      return NextResponse.json({
-        url: fallbackUrl,
-        source: "unsplash-fallback",
-        prompt,
-      });
-    }
 
     return NextResponse.json({
       url: imageUrl,

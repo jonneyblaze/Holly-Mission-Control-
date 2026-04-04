@@ -51,13 +51,13 @@ interface DashboardData {
   current_goals: CurrentGoals;
 }
 
-// ---------- Demo / fallback data ----------
-const DEMO: DashboardData = {
+// ---------- Empty state data ----------
+const EMPTY: DashboardData = {
   total_revenue: 0,
   stripe_revenue: 0,
   invoice_revenue: 0,
-  monthly_costs: 15,
-  net_profit: -15,
+  monthly_costs: 0,
+  net_profit: 0,
   total_students: 0,
   new_enrollments: 0,
   paid_enrollments: 0,
@@ -65,8 +65,8 @@ const DEMO: DashboardData = {
   enrollment_trend: [],
   revenue_trend: [],
   current_goals: {
-    revenue_target: 35000,
-    enrollment_target: 60,
+    revenue_target: 0,
+    enrollment_target: 0,
     actual_revenue: 0,
     actual_enrollments: 0,
   },
@@ -78,9 +78,9 @@ export default function FinancePage() {
     { refreshInterval: 60_000 }
   );
 
-  // Use live data, fall back to demo only on error
+  // Use live data, fall back to empty on error
   const d = useMemo(() => {
-    if (error || !data) return DEMO;
+    if (error || !data) return EMPTY;
     return data;
   }, [data, error]);
 
@@ -151,7 +151,7 @@ export default function FinancePage() {
             BodyLytics &middot; Live from Supabase
             {!isLive && (
               <span className="ml-2 text-amber-600 font-medium">
-                (showing fallback data)
+                (waiting for live data)
               </span>
             )}
           </p>

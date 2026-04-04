@@ -35,19 +35,6 @@ interface BodylyticsDashboard {
   total_revenue?: number;
 }
 
-// ── Demo / fallback data ───────────────────────────────────────────────────────
-
-const DEMO_GOALS = [
-  { label: "Revenue", actual: 2340, target: 5000, unit: "€" },
-  { label: "Enrollments", actual: 12, target: 20 },
-  { label: "Blog Posts", actual: 3, target: 8 },
-  { label: "Discovery Calls", actual: 2, target: 6 },
-  { label: "Deals Closed", actual: 1, target: 3 },
-  { label: "LinkedIn Posts", actual: 8, target: 12 },
-  { label: "YouTube Videos", actual: 0, target: 2 },
-  { label: "Proposals Sent", actual: 4, target: 8 },
-];
-
 interface CorrectiveAction {
   id: string;
   kpi: string;
@@ -55,13 +42,6 @@ interface CorrectiveAction {
   agent: string;
   status: string;
 }
-
-const DEMO_CORRECTIVE_ACTIONS: CorrectiveAction[] = [
-  { id: "1", kpi: "Revenue", action: "Flash sale campaign: 20% off NVC for Sales course", agent: "bl-marketing", status: "pending" },
-  { id: "2", kpi: "Revenue", action: "Email blast to unconverted leads with value-first content", agent: "bl-marketing", status: "executing" },
-  { id: "3", kpi: "Blog Posts", action: "Batch write 3 blog posts: micro-expressions, deception cues, mirroring", agent: "bl-marketing", status: "done" },
-  { id: "4", kpi: "Enrollments", action: "Referral boost campaign to existing students", agent: "bl-social", status: "pending" },
-];
 
 const statusConfig = {
   pending: { icon: Clock, color: "bg-amber-100 text-amber-700", label: "Pending" },
@@ -109,10 +89,10 @@ export default function GoalsPage() {
         { label: "LinkedIn Posts", actual: 0, target: g.linkedin_posts_target ?? 36 },
       ];
     }
-    return DEMO_GOALS;
+    return [];
   }, [latestSnapshot, blDashboard]);
 
-  // Corrective actions from snapshot or demo
+  // Corrective actions from snapshot only
   const correctiveActions = useMemo(() => {
     if (latestSnapshot?.corrective_actions && latestSnapshot.corrective_actions.length > 0) {
       return latestSnapshot.corrective_actions.map((a, i) => ({
@@ -120,7 +100,7 @@ export default function GoalsPage() {
         ...a,
       }));
     }
-    return DEMO_CORRECTIVE_ACTIONS;
+    return [] as CorrectiveAction[];
   }, [latestSnapshot]);
 
   const isLoading = goalsLoading;
@@ -139,6 +119,10 @@ export default function GoalsPage() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
         </div>
+      ) : goals.length === 0 ? (
+        <div className="bg-white rounded-xl border border-border p-8 text-center">
+          <p className="text-sm text-muted-foreground">No goal data yet. Goals will appear once a goal snapshot is posted or BodyLytics business goals are configured.</p>
+        </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {goals.map((g) => (
@@ -156,6 +140,11 @@ export default function GoalsPage() {
           </h2>
         </div>
         <div className="bg-white rounded-xl border border-border divide-y divide-border">
+          {correctiveActions.length === 0 && (
+            <div className="p-6 text-center text-sm text-muted-foreground">
+              No corrective actions yet. Holly will create these during mid-week goal reviews.
+            </div>
+          )}
           {correctiveActions.map((action) => {
             const config = statusConfig[action.status as keyof typeof statusConfig];
             const StatusIcon = config?.icon ?? Clock;
