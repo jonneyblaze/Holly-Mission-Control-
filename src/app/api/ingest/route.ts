@@ -94,6 +94,13 @@ export async function POST(request: NextRequest) {
           memory_usage: metadata?.memory_usage,
           alerts: metadata?.alerts || [],
           edge_functions: metadata?.edge_functions || [],
+          cpu_usage: metadata?.cpu_usage || null,
+          array_disk_usage: metadata?.array_disk_usage || null,
+          health_status: metadata?.health_status || "unknown",
+          system_uptime: metadata?.system_uptime || null,
+          prometheus_up: metadata?.prometheus_up ?? false,
+          alertmanager_up: metadata?.alertmanager_up ?? false,
+          prometheus: metadata?.prometheus || {},
         }),
         ...(specialTable === "goal_snapshots" && {
           snapshot_date: metadata?.snapshot_date || new Date().toISOString().split("T")[0],
