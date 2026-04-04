@@ -26,6 +26,8 @@ import {
   Copy,
   Check,
   Download,
+  Timer,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMCTable, useMCInsert, useMCUpdate } from "@/lib/hooks/use-mission-control";
@@ -44,6 +46,7 @@ interface Task {
   source: string;
   due_date?: string;
   created_at: string;
+  updated_at?: string;
 }
 
 interface ClarificationRequest {
@@ -152,6 +155,19 @@ async function triggerAgentAPI(
     }),
   });
   return res.json();
+}
+
+// ---------- Stuck task detection ----------
+function getTaskAge(task: Task): { minutes: number; isStuck: boolean; label: string } {
+  const ref = task.updated_at || task.created_at;
+  const ms = Date.now() - new Date(ref).getTime();
+  const minutes = Math.floor(ms / 60000);
+
+  if (minutes < 1) return { minutes, isStuck: false, label: "just now" };
+  if (minutes < 60) return { minutes, isStuck: minutes >= 15, label: `${minutes}m` };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { minutes, isStuck: true, label: `${hours}h ${minutes % 60}m` };
+  return { minutes, isStuck: true, label: `${Math.floor(hours / 24)}d ${hours % 24}h` };
 }
 
 // ---------- Edit Task Modal ----------
@@ -1531,6 +1547,67 @@ export default function TasksPage() {
                                   { addSuffix: true }
                                 )}
                               </p>
+
+                              {/* Stuck indicator for in_progress tasks */}
+                              {task.status === "in_progress" && task.assigned_agent && (() => {
+                                const age = getTaskAge(task);
+                                // Find last activity for this task
+                                const lastActivity = allActivity.find(
+                                  (a) => a.metadata?.task_id === task.id && a.activity_type !== "trigger"
+                                );
+                                const triggerCount = allActivity.filter(
+                                  (a) => a.metadata?.task_id === task.id && a.activity_type === "trigger"
+                                ).length;
+
+                                return (
+                                  <div className="mt-2 pt-2 border-t border-slate-100">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <Timer className={cn("w-3 h-3", age.isStuck ? "text-red-500" : "text-teal-500")} />
+                                        <span className={cn("text-[10px] font-medium",
+                                          age.isStuck ? "text-red-600" : "text-teal-600"
+                                        )}>
+                                          {age.isStuck ? `Stuck ${age.label}` : `Working ${age.label}`}
+                                        </span>
+                                        {triggerCount > 1 && (
+                                          <span className="text-[9px] text-muted-foreground">
+                                            (attempt {triggerCount})
+                                          </span>
+                                        )}
+                                      </div>
+                                      {age.isStuck && (
+                                        <button
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            try {
+                                              await triggerAgentAPI(
+                                                task.assigned_agent!,
+                                                task.id,
+                                                task.title,
+                                                task.description || undefined
+                                              );
+                                              toast.success("Agent re-triggered!");
+                                              refetch();
+                                            } catch {
+                                              toast.error("Failed to re-trigger");
+                                            }
+                                          }}
+                                          className="flex items-center gap-1 text-[10px] font-medium text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded transition-colors"
+                                          title="Re-trigger agent"
+                                        >
+                                          <Zap className="w-2.5 h-2.5" />
+                                          Retry
+                                        </button>
+                                      )}
+                                    </div>
+                                    {lastActivity && (
+                                      <p className="text-[9px] text-muted-foreground mt-0.5">
+                                        Last: {lastActivity.activity_type} {formatDistanceToNow(new Date(lastActivity.created_at), { addSuffix: true })}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
 
                             {/* Action menu button */}

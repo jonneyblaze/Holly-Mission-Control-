@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/task-watchdog",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
