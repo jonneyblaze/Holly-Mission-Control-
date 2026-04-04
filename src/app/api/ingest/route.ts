@@ -128,28 +128,53 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Always log to agent_activity for the feed
-    const { data, error } = await supabase
-      .from("agent_activity")
-      .insert({
-        agent_id,
-        activity_type,
-        title: title || "Untitled",
-        summary,
-        full_content,
-        metadata: metadata || {},
-        workflow,
-        status: "new",
-      })
-      .select("id")
-      .single();
+    // Suppress routine infra_snapshot activity entries — only log to feed when:
+    // 1. Health is degraded/critical (something is wrong)
+    // 2. There are active alerts
+    // 3. It's a morning (7-9am) or afternoon (14-16pm) summary window
+    // The infra_snapshots table ALWAYS gets the data (above) — this just controls the activity feed noise.
+    const isInfraRoutine = activity_type === "infra_snapshot";
+    let skipActivityLog = false;
 
-    if (error) {
-      console.error("[ingest] Error inserting activity:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (isInfraRoutine) {
+      const healthStatus = metadata?.health_status || "unknown";
+      const alertCount = Array.isArray(metadata?.alerts) ? metadata.alerts.length : 0;
+      const hour = new Date().getUTCHours(); // UTC
+      // Morning window: 7-9 UTC, Afternoon: 14-16 UTC (adjust for your timezone)
+      const isSummaryWindow = (hour >= 7 && hour < 9) || (hour >= 14 && hour < 16);
+      const isUrgent = healthStatus === "degraded" || healthStatus === "critical" || alertCount > 0;
+
+      if (!isUrgent && !isSummaryWindow) {
+        skipActivityLog = true;
+      }
     }
 
-    return NextResponse.json({ ok: true, id: data.id }, { status: 201 });
+    if (!skipActivityLog) {
+      const { data, error } = await supabase
+        .from("agent_activity")
+        .insert({
+          agent_id,
+          activity_type,
+          title: title || "Untitled",
+          summary,
+          full_content,
+          metadata: metadata || {},
+          workflow,
+          status: "new",
+        })
+        .select("id")
+        .single();
+
+      if (error) {
+        console.error("[ingest] Error inserting activity:", error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ ok: true, id: data.id }, { status: 201 });
+    }
+
+    // Infra snapshot saved to table but activity feed suppressed (routine healthy check)
+    return NextResponse.json({ ok: true, id: null, suppressed: true }, { status: 201 });
   } catch (err) {
     console.error("[ingest] Unexpected error:", err);
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
