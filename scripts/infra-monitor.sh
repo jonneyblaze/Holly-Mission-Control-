@@ -27,10 +27,11 @@ echo "[$(date -Iseconds)] Starting infrastructure monitor..."
 echo "  Collecting Docker container stats..."
 
 CONTAINERS_JSON="[]"
+TMPCONTAINERS="/tmp/infra-containers.json"
 if command -v docker &>/dev/null; then
-  # Get all containers (running and stopped)
-  CONTAINERS_JSON=$(docker ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}' | while IFS='|' read -r name status image; do
-    # Determine state
+  # Get all containers (running and stopped) — build JSON with jq
+  echo '[]' > "$TMPCONTAINERS"
+  while IFS='|' read -r name status image; do
     state="stopped"
     uptime=""
     if echo "$status" | grep -qi "up"; then
@@ -42,32 +43,35 @@ if command -v docker &>/dev/null; then
       state="exited"
     fi
 
-    echo "{\"name\":\"$name\",\"status\":\"$state\",\"uptime\":\"$uptime\",\"image\":\"$image\",\"memory_mb\":0,\"memory_percent\":0,\"cpu_percent\":0}"
-  done | jq -s '.')
+    jq --arg n "$name" --arg s "$state" --arg u "$uptime" --arg i "$image" \
+      '. + [{"name":$n,"status":$s,"uptime":$u,"image":$i,"memory_mb":0,"memory_percent":0,"cpu_percent":0}]' \
+      "$TMPCONTAINERS" > "${TMPCONTAINERS}.tmp" && mv "${TMPCONTAINERS}.tmp" "$TMPCONTAINERS"
+  done < <(docker ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}')
+
+  CONTAINERS_JSON=$(cat "$TMPCONTAINERS")
 
   # Get live stats for running containers (1 snapshot, no stream)
   STATS=$(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}|{{.MemPerc}}|{{.CPUPerc}}' 2>/dev/null || echo "")
 
   if [ -n "$STATS" ]; then
-    # Merge stats into container data
     while IFS='|' read -r name mem_usage mem_pct cpu_pct; do
-      # Parse memory (e.g., "256.4MiB / 31.25GiB" -> 256)
+      [ -z "$name" ] && continue
       mem_mb=$(echo "$mem_usage" | awk '{gsub(/[^0-9.]/, "", $1); print int($1)}')
-      mem_p=$(echo "$mem_pct" | tr -d '%' | xargs)
-      cpu_p=$(echo "$cpu_pct" | tr -d '%' | xargs)
+      mem_p=$(echo "$mem_pct" | tr -d '% ' || echo "0")
+      cpu_p=$(echo "$cpu_pct" | tr -d '% ' || echo "0")
+      # Validate numbers
+      [ -z "$mem_mb" ] && mem_mb=0
+      [ -z "$mem_p" ] && mem_p=0
+      [ -z "$cpu_p" ] && cpu_p=0
 
-      CONTAINERS_JSON=$(echo "$CONTAINERS_JSON" | jq --arg name "$name" --argjson mem "$mem_mb" --arg memp "$mem_p" --arg cpup "$cpu_p" '
-        map(if .name == $name then .memory_mb = $mem | .memory_percent = ($memp | tonumber) | .cpu_percent = ($cpup | tonumber) else . end)
+      CONTAINERS_JSON=$(echo "$CONTAINERS_JSON" | jq \
+        --arg name "$name" --argjson mem "${mem_mb:-0}" --argjson memp "${mem_p:-0}" --argjson cpup "${cpu_p:-0}" '
+        map(if .name == $name then .memory_mb = $mem | .memory_percent = $memp | .cpu_percent = $cpup else . end)
       ')
     done <<< "$STATS"
   fi
-elif command -v podman &>/dev/null; then
-  CONTAINERS_JSON=$(podman ps -a --format '{{.Names}}|{{.Status}}|{{.Image}}' | while IFS='|' read -r name status image; do
-    state="stopped"
-    uptime=""
-    if echo "$status" | grep -qi "up"; then state="running"; uptime=$(echo "$status" | sed 's/Up //'); fi
-    echo "{\"name\":\"$name\",\"status\":\"$state\",\"uptime\":\"$uptime\",\"image\":\"$image\",\"memory_mb\":0,\"memory_percent\":0,\"cpu_percent\":0}"
-  done | jq -s '.')
+
+  rm -f "$TMPCONTAINERS" "${TMPCONTAINERS}.tmp"
 fi
 
 CONTAINER_COUNT=$(echo "$CONTAINERS_JSON" | jq 'length')
@@ -92,7 +96,11 @@ if [ -d "/mnt/user" ]; then
   ARR_TOTAL=$(df -BG /mnt/user 2>/dev/null | tail -1 | awk '{gsub("G",""); print $2}')
   ARR_USED=$(df -BG /mnt/user 2>/dev/null | tail -1 | awk '{gsub("G",""); print $3}')
   ARR_PCT=$(df /mnt/user 2>/dev/null | tail -1 | awk '{gsub("%",""); print $5}')
-  ARRAY_DISK_JSON="{\"total_gb\":${ARR_TOTAL:-0},\"used_gb\":${ARR_USED:-0},\"percent\":${ARR_PCT:-0}}"
+  # Validate — Unraid can return '-' for some mounts
+  case "$ARR_PCT" in ''|*[!0-9]*) ARR_PCT=0 ;; esac
+  case "$ARR_TOTAL" in ''|*[!0-9]*) ARR_TOTAL=0 ;; esac
+  case "$ARR_USED" in ''|*[!0-9]*) ARR_USED=0 ;; esac
+  ARRAY_DISK_JSON="{\"total_gb\":${ARR_TOTAL},\"used_gb\":${ARR_USED},\"percent\":${ARR_PCT}}"
 fi
 
 # Memory
@@ -122,38 +130,27 @@ SYS_UPTIME=$(uptime -p 2>/dev/null || uptime | sed 's/.*up //' | sed 's/,.*//')
 # ---------- Prometheus Metrics ----------
 echo "  Querying Prometheus..."
 
-PROM_METRICS="[]"
+PROM_METRICS="{}"
 PROM_UP=false
 if curl -sf "${PROMETHEUS_URL}/api/v1/query?query=up" -o /dev/null 2>/dev/null; then
   PROM_UP=true
 
-  # Collect key metrics from Prometheus
-  declare -A PROM_QUERIES=(
-    ["container_cpu_usage"]="sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[5m]) * 100)"
-    ["container_memory_usage"]="container_memory_usage_bytes{name!=\"\"}"
-    ["node_cpu_seconds"]="100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)"
-    ["node_memory_available"]="node_memory_MemAvailable_bytes"
-    ["node_disk_read_bytes"]="rate(node_disk_read_bytes_total[5m])"
-    ["node_disk_write_bytes"]="rate(node_disk_written_bytes_total[5m])"
-    ["node_network_receive"]="rate(node_network_receive_bytes_total{device!=\"lo\"}[5m])"
-    ["node_network_transmit"]="rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m])"
-  )
+  # Build Prometheus metrics JSON safely using jq
+  PROM_METRICS=$(jq -n '{}')
+  for pair in \
+    "container_cpu_usage:sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[5m]) * 100)" \
+    "node_cpu_seconds:100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)" \
+    "node_memory_available:node_memory_MemAvailable_bytes"; do
 
-  PROM_METRICS="{"
-  first=true
-  for key in "${!PROM_QUERIES[@]}"; do
-    query="${PROM_QUERIES[$key]}"
+    key="${pair%%:*}"
+    query="${pair#*:}"
     result=$(curl -sf "${PROMETHEUS_URL}/api/v1/query" --data-urlencode "query=$query" 2>/dev/null || echo '{"data":{"result":[]}}')
     data=$(echo "$result" | jq -c '.data.result // []' 2>/dev/null || echo '[]')
-
-    if [ "$first" = true ]; then first=false; else PROM_METRICS+=","; fi
-    PROM_METRICS+="\"$key\":$data"
+    PROM_METRICS=$(echo "$PROM_METRICS" | jq --arg k "$key" --argjson v "$data" '. + {($k): $v}')
   done
-  PROM_METRICS+="}"
 
   echo "  Prometheus: OK"
 else
-  PROM_METRICS="{}"
   echo "  Prometheus: not reachable"
 fi
 
@@ -244,11 +241,13 @@ PAYLOAD=$(jq -n \
     }
   }')
 
-HTTP_CODE=$(curl -sf -o /tmp/infra-response.json -w "%{http_code}" \
+HTTP_CODE=$(curl -s -o /tmp/infra-response.json -w "%{http_code}" \
   -X POST "$MC_INGEST_URL" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $MC_API_KEY" \
-  -d "$PAYLOAD" 2>/dev/null || echo "000")
+  -H "Authorization: Bearer ${MC_API_KEY}" \
+  -d "$PAYLOAD" 2>/dev/null)
+
+[ -z "$HTTP_CODE" ] && HTTP_CODE="000"
 
 if [ "$HTTP_CODE" = "201" ]; then
   echo "  Posted successfully (HTTP $HTTP_CODE)"

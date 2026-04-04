@@ -68,8 +68,9 @@ export async function POST(request: NextRequest) {
 
     if (specialTable) {
       // For special types, insert the metadata/content into the appropriate table
+      // Note: don't spread metadata for infra_snapshots — only use explicit fields
       const insertData = {
-        ...metadata,
+        ...(specialTable !== "infra_snapshots" ? metadata : {}),
         ...(specialTable === "social_posts" && {
           platform: metadata?.platform || "linkedin",
           content: full_content || title,
