@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { useMCTable } from "@/lib/hooks/use-mission-control";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Server,
   HardDrive,
@@ -25,6 +25,10 @@ import {
   Gauge,
   ChevronDown,
   ChevronUp,
+  Cloud,
+  ExternalLink,
+  GitBranch,
+  Zap,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ViewOutputButton } from "@/components/dashboard/ContentModal";
@@ -117,6 +121,39 @@ interface AgentActivity {
   full_content: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
+}
+
+// ---------- Cloud Status Types ----------
+interface CloudSubProject {
+  name: string;
+  status: "healthy" | "degraded" | "down" | "unknown";
+  url: string;
+  latency_ms?: number;
+  details: Record<string, unknown>;
+}
+
+interface CloudDeployment {
+  uid: string;
+  name: string;
+  url: string;
+  state: string;
+  created: number;
+  meta?: { githubCommitMessage?: string; githubCommitRef?: string };
+}
+
+interface CloudStatus {
+  health: "healthy" | "degraded" | "critical";
+  checked_at: string;
+  vercel: {
+    mission_control: CloudSubProject | null;
+    bodylytics: CloudSubProject | null;
+    recent_deployments: CloudDeployment[];
+  };
+  supabase: {
+    mission_control: CloudSubProject | null;
+    bodylytics: CloudSubProject | null;
+  };
+  uptime: CloudSubProject[];
 }
 
 // ---------- Gauge Component ----------
@@ -401,6 +438,30 @@ function PrometheusChart({ data, title, color, unit, domain }: {
 export default function InfrastructurePage() {
   const [showAllReports, setShowAllReports] = useState(false);
   const [containersExpanded, setContainersExpanded] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
+  const [cloudLoading, setCloudLoading] = useState(true);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+
+  const fetchCloudStatus = useCallback(async () => {
+    try {
+      setCloudLoading(true);
+      const resp = await fetch("/api/cloud-status");
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      setCloudStatus(data);
+      setCloudError(null);
+    } catch (err) {
+      setCloudError(err instanceof Error ? err.message : "Failed to fetch");
+    } finally {
+      setCloudLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCloudStatus();
+    const interval = setInterval(fetchCloudStatus, 120_000); // Refresh every 2 min
+    return () => clearInterval(interval);
+  }, [fetchCloudStatus]);
 
   // Structured snapshots
   const { data: snapshots, loading: snapshotsLoading } = useMCTable<InfraSnapshot>("infra_snapshots", {
@@ -672,6 +733,292 @@ export default function InfrastructurePage() {
           )}
         </div>
       )}
+
+      {/* ==================== Cloud Infrastructure ==================== */}
+      <div className="bg-white rounded-xl border border-border p-6">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-sm font-semibold text-navy-500 flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-teal-600" />
+            Cloud Infrastructure
+          </h2>
+          <div className="flex items-center gap-2">
+            {cloudStatus && (
+              <span className={cn(
+                "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                cloudStatus.health === "healthy" ? "bg-emerald-100 text-emerald-700" :
+                cloudStatus.health === "degraded" ? "bg-amber-100 text-amber-700" :
+                "bg-red-100 text-red-700"
+              )}>
+                {cloudStatus.health === "healthy" ? "All Cloud Services Up" :
+                 cloudStatus.health === "degraded" ? "Some Issues" : "Critical"}
+              </span>
+            )}
+            <button
+              onClick={fetchCloudStatus}
+              disabled={cloudLoading}
+              className="text-muted-foreground hover:text-navy-500 transition-colors"
+              title="Refresh cloud status"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", cloudLoading && "animate-spin")} />
+            </button>
+          </div>
+        </div>
+
+        {cloudLoading && !cloudStatus ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 text-teal-500 animate-spin" />
+            <span className="text-xs text-muted-foreground ml-2">Checking cloud services...</span>
+          </div>
+        ) : cloudError && !cloudStatus ? (
+          <div className="text-center py-6">
+            <XCircle className="w-6 h-6 text-red-300 mx-auto mb-2" />
+            <p className="text-xs text-muted-foreground">{cloudError}</p>
+          </div>
+        ) : cloudStatus ? (
+          <div className="space-y-5">
+            {/* Site Uptime Checks */}
+            {cloudStatus.uptime.length > 0 && (
+              <div>
+                <h3 className="text-xs font-medium text-slate-500 mb-2.5 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5" />
+                  Site Uptime
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {cloudStatus.uptime.map((site) => (
+                    <div
+                      key={site.name}
+                      className={cn(
+                        "rounded-lg border p-3 transition-all",
+                        site.status === "healthy" ? "border-emerald-200 bg-emerald-50/50" :
+                        site.status === "degraded" ? "border-amber-200 bg-amber-50/50" :
+                        "border-red-200 bg-red-50/50"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-navy-500">{site.name}</span>
+                        <div className={cn(
+                          "w-2 h-2 rounded-full",
+                          site.status === "healthy" ? "bg-emerald-500" :
+                          site.status === "degraded" ? "bg-amber-500" :
+                          "bg-red-500"
+                        )} />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className={cn(
+                          "text-[10px] font-medium",
+                          site.status === "healthy" ? "text-emerald-600" :
+                          site.status === "degraded" ? "text-amber-600" :
+                          "text-red-600"
+                        )}>
+                          {site.status === "healthy" ? "Online" :
+                           site.status === "degraded" ? "Degraded" : "Offline"}
+                        </span>
+                        {site.latency_ms != null && (
+                          <span className="text-[10px] text-muted-foreground">{site.latency_ms}ms</span>
+                        )}
+                      </div>
+                      {site.details?.http_status != null && (
+                        <span className="text-[9px] text-muted-foreground">
+                          HTTP {String(site.details.http_status)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Vercel + Supabase Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Vercel Section */}
+              <div>
+                <h3 className="text-xs font-medium text-slate-500 mb-2.5 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" />
+                  Vercel Deployments
+                </h3>
+                <div className="space-y-2">
+                  {[
+                    { label: "Mission Control", data: cloudStatus.vercel.mission_control },
+                    { label: "BodyLytics", data: cloudStatus.vercel.bodylytics },
+                  ].map(({ label, data }) => (
+                    <div
+                      key={label}
+                      className={cn(
+                        "rounded-lg border p-3",
+                        !data ? "border-slate-200 bg-slate-50/50" :
+                        data.status === "healthy" ? "border-emerald-200 bg-emerald-50/30" :
+                        data.status === "degraded" ? "border-amber-200 bg-amber-50/30" :
+                        "border-red-200 bg-red-50/30"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-semibold text-navy-500">{label}</span>
+                        {data ? (
+                          <span className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                            data.status === "healthy" ? "bg-emerald-100 text-emerald-700" :
+                            data.status === "degraded" ? "bg-amber-100 text-amber-700" :
+                            "bg-red-100 text-red-700"
+                          )}>
+                            {data.status === "healthy" ? "READY" :
+                             data.status === "degraded" ? "BUILDING" : "ERROR"}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">No token</span>
+                        )}
+                      </div>
+                      {data?.details?.latest_deploy != null && (() => {
+                        const dep = data.details.latest_deploy as Record<string, unknown>;
+                        const commit = dep?.commit ? String(dep.commit) : null;
+                        const branch = dep?.branch ? String(dep.branch) : null;
+                        const created = dep?.created ? String(dep.created) : null;
+                        return (
+                          <div className="text-[10px] text-muted-foreground space-y-0.5">
+                            {commit && (
+                              <p className="truncate flex items-center gap-1">
+                                <GitBranch className="w-2.5 h-2.5 flex-shrink-0" />
+                                {commit}
+                              </p>
+                            )}
+                            {branch && (
+                              <p className="text-[9px] opacity-70">Branch: {branch}</p>
+                            )}
+                            {created && (
+                              <p className="text-[9px] opacity-70">
+                                {formatDistanceToNow(new Date(created), { addSuffix: true })}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      {!data && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Set VERCEL_TOKEN + project IDs in env
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Supabase Section */}
+              <div>
+                <h3 className="text-xs font-medium text-slate-500 mb-2.5 flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5" />
+                  Supabase Health
+                </h3>
+                <div className="space-y-2">
+                  {[
+                    { label: "Mission Control", data: cloudStatus.supabase.mission_control },
+                    { label: "BodyLytics", data: cloudStatus.supabase.bodylytics },
+                  ].map(({ label, data }) => (
+                    <div
+                      key={label}
+                      className={cn(
+                        "rounded-lg border p-3",
+                        !data ? "border-slate-200 bg-slate-50/50" :
+                        data.status === "healthy" ? "border-emerald-200 bg-emerald-50/30" :
+                        data.status === "degraded" ? "border-amber-200 bg-amber-50/30" :
+                        "border-red-200 bg-red-50/30"
+                      )}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-semibold text-navy-500">{label}</span>
+                        {data ? (
+                          <div className="flex items-center gap-1.5">
+                            <div className={cn(
+                              "w-2 h-2 rounded-full",
+                              data.status === "healthy" ? "bg-emerald-500" :
+                              data.status === "degraded" ? "bg-amber-500" :
+                              "bg-red-500"
+                            )} />
+                            {data.latency_ms != null && (
+                              <span className="text-[10px] text-muted-foreground">{data.latency_ms}ms</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">Not configured</span>
+                        )}
+                      </div>
+                      {data?.details && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {["rest_api", "auth", "storage"].map((svc) => {
+                            const svcData = data.details[svc] as { status?: string; latency_ms?: number } | undefined;
+                            if (!svcData) return null;
+                            const isUp = svcData.status === "up";
+                            return (
+                              <div
+                                key={svc}
+                                className={cn(
+                                  "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded",
+                                  isUp ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                                )}
+                              >
+                                <div className={cn("w-1.5 h-1.5 rounded-full", isUp ? "bg-emerald-400" : "bg-red-400")} />
+                                {svc === "rest_api" ? "REST" : svc.charAt(0).toUpperCase() + svc.slice(1)}
+                                {svcData.latency_ms != null && (
+                                  <span className="opacity-60">{svcData.latency_ms}ms</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Deployments */}
+            {cloudStatus.vercel.recent_deployments.length > 0 && (
+              <div>
+                <h3 className="text-xs font-medium text-slate-500 mb-2.5 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5" />
+                  Recent Deployments
+                </h3>
+                <div className="space-y-1.5">
+                  {cloudStatus.vercel.recent_deployments.slice(0, 5).map((deploy) => (
+                    <div
+                      key={deploy.uid}
+                      className="flex items-center gap-3 text-xs bg-slate-50/80 rounded-lg px-3 py-2"
+                    >
+                      <div className={cn(
+                        "w-2 h-2 rounded-full flex-shrink-0",
+                        deploy.state === "READY" ? "bg-emerald-500" :
+                        deploy.state === "ERROR" ? "bg-red-500" :
+                        "bg-amber-500"
+                      )} />
+                      <span className="font-medium text-navy-500 truncate max-w-[120px]">{deploy.name}</span>
+                      {deploy.meta?.githubCommitMessage && (
+                        <span className="text-muted-foreground truncate flex-1 min-w-0">
+                          {deploy.meta.githubCommitMessage.substring(0, 60)}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                        {formatDistanceToNow(new Date(deploy.created), { addSuffix: true })}
+                      </span>
+                      <a
+                        href={`https://${deploy.url}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-teal-500 hover:text-teal-700 flex-shrink-0"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Last checked */}
+            <p className="text-[10px] text-muted-foreground text-right">
+              Last checked: {format(new Date(cloudStatus.checked_at), "HH:mm:ss")}
+            </p>
+          </div>
+        ) : null}
+      </div>
 
       {/* Prometheus Charts */}
       {charts && (charts.cpu?.length || charts.memory?.length) && (
