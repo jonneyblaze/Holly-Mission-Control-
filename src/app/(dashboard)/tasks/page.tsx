@@ -19,6 +19,13 @@ import {
   Bell,
   CheckCircle2,
   Calendar,
+  Eye,
+  ThumbsUp,
+  RotateCcw,
+  FileText,
+  Copy,
+  Check,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMCTable, useMCInsert, useMCUpdate } from "@/lib/hooks/use-mission-control";
@@ -100,6 +107,28 @@ const agentLabels: Record<string, string> = {
   devops: "DevOps",
   "duracell-prep": "Duracell Prep",
 };
+
+// ---------- Expandable clarification text ----------
+function ClarificationText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 200;
+
+  return (
+    <div className="mb-2">
+      <p className={cn("text-xs text-amber-800 whitespace-pre-wrap", !expanded && isLong && "line-clamp-2")}>
+        {text}
+      </p>
+      {isLong && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] font-medium text-amber-600 hover:text-amber-800 mt-0.5"
+        >
+          {expanded ? "Show less" : "Read full message →"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 const INGEST_KEY = "9eRse679@ohyEdCz&UAUL@V9V6t*xW@%47r4vQfFeThowllEBsIv";
 
@@ -718,9 +747,7 @@ function ClarificationCard({
               <span className="text-[10px] text-amber-400 italic">no linked task</span>
             )}
           </div>
-          <p className="text-xs text-amber-800 line-clamp-2 mb-2">
-            {clarification.full_content || clarification.summary || clarification.title}
-          </p>
+          <ClarificationText text={clarification.full_content || clarification.summary || clarification.title} />
           <div className="flex gap-1.5">
             <input
               type="text"
@@ -745,6 +772,283 @@ function ClarificationCard({
   );
 }
 
+// ---------- Simple Markdown Renderer ----------
+function renderMarkdown(md: string): string {
+  return md
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-slate-900 text-slate-100 rounded-lg p-4 overflow-x-auto text-sm my-3 font-mono"><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code class="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-sm font-mono">$1</code>')
+    .replace(/^### (.+)$/gm, '<h3 class="text-base font-bold text-navy-500 mt-4 mb-1">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 class="text-lg font-bold text-navy-500 mt-5 mb-2">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 class="text-xl font-bold text-navy-500 mt-5 mb-2">$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-slate-800">$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc text-slate-600 text-sm">$1</li>')
+    .replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal text-slate-600 text-sm">$1</li>')
+    .replace(/^---$/gm, '<hr class="border-slate-200 my-3" />')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="text-teal-600 underline hover:text-teal-700">$1</a>')
+    .replace(/^> (.+)$/gm, '<blockquote class="border-l-4 border-teal-300 pl-4 py-1 my-2 text-slate-600 italic text-sm">$1</blockquote>')
+    .replace(/^(?!<[a-z])((?!<[a-z]).+)$/gm, (match) => {
+      if (!match.trim()) return "";
+      return `<p class="text-sm text-slate-600 leading-relaxed my-1">${match}</p>`;
+    });
+}
+
+// ---------- Review Modal ----------
+function ReviewModal({
+  task,
+  agentOutput,
+  onClose,
+  onApprove,
+  onReject,
+  onEdit,
+}: {
+  task: Task;
+  agentOutput: ClarificationRequest[];
+  onClose: () => void;
+  onApprove: () => void;
+  onReject: () => void;
+  onEdit: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+  const [showRejectInput, setShowRejectInput] = useState(false);
+
+  const agentName = agentLabels[task.assigned_agent || ""] || task.assigned_agent || "Agent";
+  const agentEmoji = agentEmojis[task.assigned_agent || ""] || "🤖";
+
+  // Get the completion output (most recent task_complete for this task)
+  const completion = agentOutput.find(
+    (a) =>
+      a.metadata?.task_id === task.id &&
+      (a.activity_type === "task_complete" || a.activity_type === "report" || a.activity_type === "content")
+  );
+
+  // All activity for this task
+  const taskActivity = agentOutput.filter(
+    (a) => a.metadata?.task_id === task.id && a.activity_type !== "trigger"
+  );
+
+  const content = completion?.full_content || completion?.summary || null;
+
+  const handleCopy = () => {
+    if (content) {
+      navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleDownload = () => {
+    if (content) {
+      const blob = new Blob([content], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${task.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b border-slate-200 flex-shrink-0">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <span className="text-2xl mt-0.5">{agentEmoji}</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <Badge className="bg-copper-100 text-copper-700 text-[10px]">Review</Badge>
+                <span className="text-xs text-muted-foreground">
+                  {agentName} · {formatDistanceToNow(new Date(task.created_at), { addSuffix: true })}
+                </span>
+              </div>
+              <h2 className="text-lg font-montserrat font-bold text-navy-500 pr-8">
+                {task.title}
+              </h2>
+              {task.description && (
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                  {task.description.split("\n---")[0]}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {content && (
+              <>
+                <button
+                  onClick={handleCopy}
+                  className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                  title="Copy output"
+                >
+                  {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                  title="Download"
+                >
+                  <Download className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </>
+            )}
+            <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100 transition-colors ml-1">
+              <X className="w-4 h-4 text-muted-foreground" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          {completion ? (
+            <div className="p-5">
+              {/* Summary */}
+              {completion.summary && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-slate-700">
+                    <strong>Summary:</strong> {completion.summary}
+                  </p>
+                </div>
+              )}
+
+              {/* Full content */}
+              {content && (
+                <div
+                  className="max-w-none"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+                />
+              )}
+            </div>
+          ) : taskActivity.length > 0 ? (
+            /* No completion but has other activity */
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-slate-500 italic mb-3">
+                No completion report found. Showing all activity for this task:
+              </p>
+              {taskActivity.map((a) => (
+                <div key={a.id} className="bg-slate-50 rounded-lg border border-slate-200 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge className="text-[10px] bg-slate-100 text-slate-600">{a.activity_type}</Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(new Date(a.created_at), { addSuffix: true })}
+                    </span>
+                  </div>
+                  <p className="text-sm font-medium text-navy-500">{a.title}</p>
+                  {a.summary && <p className="text-xs text-slate-500 mt-1">{a.summary}</p>}
+                  {a.full_content && (
+                    <div
+                      className="mt-2 text-xs text-slate-600 max-h-40 overflow-y-auto"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(a.full_content) }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* No output at all */
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <FileText className="w-12 h-12 text-slate-200 mb-3" />
+              <p className="text-sm font-medium text-slate-500">No agent output found</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                The agent may still be working, or the output wasn&apos;t linked to this task.
+              </p>
+              <button
+                onClick={onEdit}
+                className="mt-4 text-xs text-teal-600 hover:text-teal-700 font-medium underline"
+              >
+                Edit task details
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Action bar */}
+        <div className="flex items-center gap-3 p-4 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+          <button
+            onClick={onEdit}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-white rounded-lg border border-slate-200 transition-colors"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            Edit Task
+          </button>
+
+          <div className="flex-1" />
+
+          {showRejectInput ? (
+            <div className="flex items-center gap-2 flex-1 max-w-md">
+              <input
+                type="text"
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setRejecting(true);
+                    onReject();
+                  }
+                  if (e.key === "Escape") setShowRejectInput(false);
+                }}
+                placeholder="What needs fixing? (optional)"
+                autoFocus
+                className="flex-1 h-9 px-3 bg-white border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-red-400/30"
+              />
+              <Button
+                onClick={() => {
+                  setRejecting(true);
+                  onReject();
+                }}
+                disabled={rejecting}
+                size="sm"
+                className="bg-red-500 hover:bg-red-600 text-white h-9"
+              >
+                {rejecting ? <Loader2 className="w-3 h-3 animate-spin" /> : "Send Back"}
+              </Button>
+              <button
+                onClick={() => setShowRejectInput(false)}
+                className="text-xs text-slate-400 hover:text-slate-600"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <>
+              <Button
+                onClick={() => setShowRejectInput(true)}
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-red-600 border-red-200 hover:bg-red-50"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Send Back
+              </Button>
+              <Button
+                onClick={() => {
+                  setApproving(true);
+                  onApprove();
+                }}
+                disabled={approving}
+                size="sm"
+                className="gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white"
+              >
+                {approving ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3.5 h-3.5" />}
+                Approve & Complete
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Main Page ----------
 export default function TasksPage() {
   const {
@@ -756,12 +1060,16 @@ export default function TasksPage() {
     realtime: true,
   });
 
-  // Fetch clarification requests from agent_activity
-  const { data: clarifications, refetch: refetchClarifications } =
+  // Fetch ALL agent_activity (clarifications + completions for review)
+  const { data: allActivity, refetch: refetchActivity } =
     useMCTable<ClarificationRequest>("agent_activity", {
-      limit: 100,
+      limit: 300,
       realtime: true,
     });
+
+  // Alias for clarity
+  const clarifications = allActivity;
+  const refetchClarifications = refetchActivity;
 
   const { update } = useMCUpdate("tasks");
 
@@ -769,6 +1077,7 @@ export default function TasksPage() {
   const [draggedTask, setDraggedTask] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [reviewingTask, setReviewingTask] = useState<Task | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -885,6 +1194,52 @@ export default function TasksPage() {
         />
       )}
 
+      {/* Review Modal */}
+      {reviewingTask && (
+        <ReviewModal
+          task={reviewingTask}
+          agentOutput={allActivity}
+          onClose={() => setReviewingTask(null)}
+          onApprove={async () => {
+            await update(reviewingTask.id, {
+              status: "done",
+              completed_at: new Date().toISOString(),
+            });
+            toast.success("Task approved and completed!");
+            setReviewingTask(null);
+            refetch();
+          }}
+          onReject={async () => {
+            await update(reviewingTask.id, {
+              status: "in_progress",
+            });
+            // Re-trigger agent
+            if (reviewingTask.assigned_agent) {
+              try {
+                await triggerAgentAPI(
+                  reviewingTask.assigned_agent,
+                  reviewingTask.id,
+                  reviewingTask.title,
+                  reviewingTask.description || undefined
+                );
+                toast.success("Sent back — agent is reworking it");
+              } catch {
+                toast.warning("Sent back but couldn't re-trigger agent");
+              }
+            } else {
+              toast.success("Task sent back to In Progress");
+            }
+            setReviewingTask(null);
+            refetch();
+          }}
+          onEdit={() => {
+            const task = reviewingTask;
+            setReviewingTask(null);
+            setEditingTask(task);
+          }}
+        />
+      )}
+
       {/* Add Modal */}
       {showAddModal && (
         <AddTaskModal
@@ -936,7 +1291,7 @@ export default function TasksPage() {
             </span>
             <ChevronRight className="w-4 h-4 text-amber-500 transition-transform [details[open]_&]:rotate-90" />
           </summary>
-          <div className="px-3 pb-3 space-y-2 max-h-[280px] overflow-y-auto">
+          <div className="px-3 pb-3 space-y-2 max-h-[350px] overflow-y-auto">
             {allPendingClarifications.map((clar) => {
               const matchingTask = tasks.find((t) => t.id === clar.metadata?.task_id);
               return (
@@ -1047,7 +1402,11 @@ export default function TasksPage() {
                             <GripVertical className="w-3 h-3 text-muted-foreground mt-1 flex-shrink-0 opacity-40 group-hover:opacity-100 transition-opacity" />
                             <div
                               className="flex-1 min-w-0 cursor-pointer"
-                              onClick={() => setEditingTask(task)}
+                              onClick={() =>
+                                col.id === "review"
+                                  ? setReviewingTask(task)
+                                  : setEditingTask(task)
+                              }
                             >
                               <p className="text-sm font-medium text-navy-500 mb-1.5 pr-6">
                                 {task.title}
@@ -1250,38 +1609,67 @@ export default function TasksPage() {
 
                           {/* Quick action bar on hover */}
                           <div className="flex gap-1 mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingTask(task);
-                              }}
-                              className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50 rounded transition-colors"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              Edit
-                            </button>
-                            {colIndex < columnOrder.length - 1 && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  moveTask(task.id, columnOrder[colIndex + 1]);
-                                }}
-                                className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-teal-600 hover:bg-teal-50 rounded transition-colors"
-                              >
-                                <ArrowRight className="w-3 h-3" />
-                                {columns[colIndex + 1].label}
-                              </button>
-                            )}
-                            {col.id !== "done" && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  moveTask(task.id, "done");
-                                }}
-                                className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
-                              >
-                                Done
-                              </button>
+                            {col.id === "review" ? (
+                              /* Review column: show Review + Approve actions */
+                              <>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setReviewingTask(task);
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-copper-600 hover:bg-copper-50 rounded transition-colors"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  Review
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    moveTask(task.id, "done");
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
+                                >
+                                  <ThumbsUp className="w-3 h-3" />
+                                  Approve
+                                </button>
+                              </>
+                            ) : (
+                              /* Other columns: standard Edit + Move actions */
+                              <>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingTask(task);
+                                  }}
+                                  className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50 rounded transition-colors"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  Edit
+                                </button>
+                                {colIndex < columnOrder.length - 1 && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      moveTask(task.id, columnOrder[colIndex + 1]);
+                                    }}
+                                    className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-teal-600 hover:bg-teal-50 rounded transition-colors"
+                                  >
+                                    <ArrowRight className="w-3 h-3" />
+                                    {columns[colIndex + 1].label}
+                                  </button>
+                                )}
+                                {col.id !== "done" && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      moveTask(task.id, "done");
+                                    }}
+                                    className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] font-medium text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
+                                  >
+                                    Done
+                                  </button>
+                                )}
+                              </>
                             )}
                             <button
                               onClick={(e) => {
