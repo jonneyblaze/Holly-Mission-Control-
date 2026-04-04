@@ -25,16 +25,39 @@ export async function POST(request: NextRequest) {
 
     const prompt = buildPrompt(agent_id, task_title, task_description, task_id);
 
-    // Fire-and-forget: send the request to OpenClaw but don't wait for completion
-    // The agent will process in the background and POST results to /api/ingest
-    let triggered = false;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+    // ALWAYS queue the task to Supabase first (reliable — works on serverless)
+    let queued = false;
+    if (supabaseUrl && serviceKey) {
+      const supabase = createClient(supabaseUrl, serviceKey);
+
+      const { error: queueError } = await supabase.from("agent_activity").insert({
+        agent_id,
+        activity_type: "trigger",
+        title: `Task: ${task_title}`,
+        summary: task_description || null,
+        full_content: prompt,
+        metadata: { task_id, queued: true, source: "mission-control" },
+        status: "pending",
+      });
+
+      if (!queueError) {
+        queued = true;
+      } else {
+        console.error("[trigger-agent] Queue error:", queueError.message);
+      }
+    }
+
+    // ALSO try direct OpenClaw call (best-effort, with timeout)
+    // On serverless, this must complete before the response is sent
+    let directTriggered = false;
     try {
-      // First, do a quick connectivity check (HEAD-like) using a tiny prompt
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
+      const timeout = setTimeout(() => controller.abort(), 10000);
 
-      const testResponse = await fetch(OPENCLAW_URL, {
+      const response = await fetch(OPENCLAW_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -47,67 +70,44 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify({
           model: `openclaw:${agent_id}`,
-          messages: [{ role: "user", content: "Acknowledge: reply with just OK" }],
+          messages: [{ role: "user", content: prompt }],
         }),
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
 
-      if (testResponse.ok) {
-        // Agent is reachable — now fire the real task (don't await)
-        fetch(OPENCLAW_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${OPENCLAW_TOKEN}`,
-            "x-openclaw-agent-id": agent_id,
-            ...(process.env.CF_ACCESS_CLIENT_ID && {
-              "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
-              "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET || "",
-            }),
-          },
-          body: JSON.stringify({
-            model: `openclaw:${agent_id}`,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        }).catch(() => {
-          // Fire and forget — errors are expected since we don't await
-        });
+      if (response.ok) {
+        directTriggered = true;
 
-        triggered = true;
+        // Mark the queued trigger as actioned since we triggered directly
+        if (queued && supabaseUrl && serviceKey) {
+          const supabase = createClient(supabaseUrl, serviceKey);
+          await supabase
+            .from("agent_activity")
+            .update({ status: "actioned" })
+            .eq("agent_id", agent_id)
+            .eq("activity_type", "trigger")
+            .eq("status", "pending")
+            .order("created_at", { ascending: false })
+            .limit(1);
+        }
+      } else {
+        console.log(`[trigger-agent] Direct call returned ${response.status}, relying on queue`);
       }
-    } catch {
-      console.log("[trigger-agent] Direct OpenClaw call failed, queueing via Supabase");
+    } catch (err) {
+      // Timeout or network error — task is queued, agent will pick it up via cron
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      if (isAbort) {
+        // The agent IS processing (just took > 10s) — that's fine
+        directTriggered = true;
+        console.log("[trigger-agent] Direct call timed out — agent likely processing");
+      } else {
+        console.log("[trigger-agent] Direct call failed, relying on queue");
+      }
     }
 
-    // If direct call failed, queue the trigger via Supabase
-    if (!triggered) {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-      if (supabaseUrl && serviceKey) {
-        const supabase = createClient(supabaseUrl, serviceKey);
-
-        await supabase.from("agent_activity").insert({
-          agent_id,
-          activity_type: "trigger",
-          title: `Task: ${task_title}`,
-          summary: task_description || null,
-          full_content: prompt,
-          metadata: { task_id, queued: true, source: "mission-control" },
-          status: "pending",
-        });
-
-        return NextResponse.json({
-          ok: true,
-          queued: true,
-          agent_id,
-          task_id,
-          message: "Task queued — agent will pick it up shortly",
-        });
-      }
-
+    if (!queued && !directTriggered) {
       return NextResponse.json(
         { error: "Failed to trigger agent and couldn't queue" },
         { status: 502 }
@@ -116,10 +116,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      queued: false,
+      queued,
+      directTriggered,
       agent_id,
       task_id,
-      message: "Agent triggered — working on it now",
+      message: directTriggered
+        ? "Agent triggered — working on it now"
+        : "Task queued — agent will pick it up shortly",
     });
   } catch (err) {
     console.error("[trigger-agent] Error:", err);
