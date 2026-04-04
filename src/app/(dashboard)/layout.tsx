@@ -1,5 +1,6 @@
 import Sidebar from "@/components/dashboard/Sidebar";
 import Topbar from "@/components/dashboard/Topbar";
+import HollyChat from "@/components/dashboard/HollyChat";
 
 export default function DashboardLayout({
   children,
@@ -13,6 +14,7 @@ export default function DashboardLayout({
         <Topbar />
         <main className="flex-1 p-6 overflow-auto">{children}</main>
       </div>
+      <HollyChat />
     </div>
   );
 }

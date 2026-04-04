@@ -18,9 +18,12 @@ import {
   Play,
   Pause,
   Send,
+  MessageCircleQuestion,
+  Bell,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
+import { toast } from "sonner";
 
 // ---------- Agent roster ----------
 const agentRoster = [
@@ -44,6 +47,8 @@ interface Activity {
   title: string;
   summary: string;
   full_content: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -70,6 +75,7 @@ const typeColor: Record<string, string> = {
   task: "bg-emerald-100 text-emerald-700",
   goal_snapshot: "bg-amber-100 text-amber-700",
   kb_gap: "bg-orange-100 text-orange-700",
+  clarification: "bg-amber-100 text-amber-700",
 };
 
 const priorityColor: Record<string, string> = {
@@ -78,6 +84,8 @@ const priorityColor: Record<string, string> = {
   medium: "bg-amber-100 text-amber-700 border-amber-200",
   low: "bg-slate-100 text-slate-600 border-slate-200",
 };
+
+const INGEST_KEY = "9eRse679@ohyEdCz&UAUL@V9V6t*xW@%47r4vQfFeThowllEBsIv";
 
 function getTimingStatus(lastActivity: string | undefined): {
   label: string;
@@ -105,32 +113,64 @@ function QuickTaskModal({
   onCreated: () => void;
 }) {
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [priority, setPriority] = useState("medium");
   const { insert, loading } = useMCInsert("tasks");
+  const [triggering, setTriggering] = useState(false);
 
   const handleSubmit = async () => {
     if (!title.trim()) return;
-    await insert({
-      title: title.trim(),
-      status: "todo",
-      priority,
-      assigned_agent: agentId,
-      source: "manual",
-    });
-    onCreated();
-    onClose();
+    try {
+      // Create the task
+      const taskData = {
+        title: title.trim(),
+        description: description.trim() || null,
+        status: "in_progress",
+        priority,
+        assigned_agent: agentId,
+        source: "manual",
+      };
+      await insert(taskData);
+
+      // Trigger the agent via OpenClaw
+      setTriggering(true);
+      try {
+        const res = await fetch("/api/trigger-agent", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${INGEST_KEY}`,
+          },
+          body: JSON.stringify({
+            agent_id: agentId,
+            task_title: title.trim(),
+            task_description: description.trim() || undefined,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          toast.success(`${agentName} is now working on it!`);
+        } else {
+          toast.warning(`Task created but couldn't trigger ${agentName}: ${data.error}`);
+        }
+      } catch {
+        toast.warning(`Task created but couldn't reach ${agentName}`);
+      }
+
+      onCreated();
+      onClose();
+    } catch {
+      toast.error("Failed to create task");
+    } finally {
+      setTriggering(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-navy-500">
-            Assign task to {agentName}
-          </h3>
+          <h3 className="font-semibold text-navy-500">Assign task to {agentName}</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-navy-500">
             <X className="w-4 h-4" />
           </button>
@@ -141,9 +181,17 @@ function QuickTaskModal({
           placeholder="Task title..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSubmit()}
           autoFocus
           className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500"
+        />
+
+        <textarea
+          placeholder="Additional context or instructions..."
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={3}
+          className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 resize-none"
         />
 
         <div className="flex gap-2">
@@ -164,22 +212,38 @@ function QuickTaskModal({
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-muted-foreground hover:text-navy-500 transition-colors"
-          >
+          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-navy-500 transition-colors">
             Cancel
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!title.trim() || loading}
+            disabled={!title.trim() || loading || triggering}
             className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
           >
-            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-            Assign Task
+            {loading || triggering ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Send className="w-3.5 h-3.5" />
+            )}
+            {triggering ? "Triggering..." : "Assign & Run"}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- Agent Working Animation ----------
+function WorkingAnimation() {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="flex gap-0.5">
+        <div className="w-1 h-3 bg-teal-400 rounded-full animate-pulse" style={{ animationDelay: "0ms", animationDuration: "1s" }} />
+        <div className="w-1 h-4 bg-teal-500 rounded-full animate-pulse" style={{ animationDelay: "200ms", animationDuration: "1s" }} />
+        <div className="w-1 h-2.5 bg-teal-400 rounded-full animate-pulse" style={{ animationDelay: "400ms", animationDuration: "1s" }} />
+        <div className="w-1 h-3.5 bg-teal-500 rounded-full animate-pulse" style={{ animationDelay: "600ms", animationDuration: "1s" }} />
+      </div>
+      <span className="text-[10px] font-bold text-teal-600 uppercase tracking-wider">Working</span>
     </div>
   );
 }
@@ -200,6 +264,7 @@ export default function AgentsPage() {
 
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [taskModalAgent, setTaskModalAgent] = useState<{ id: string; name: string } | null>(null);
+  const [triggeringAgent, setTriggeringAgent] = useState<string | null>(null);
 
   const isLoading = activitiesLoading && tasksLoading;
 
@@ -207,22 +272,82 @@ export default function AgentsPage() {
     setExpandedAgent((prev) => (prev === agentId ? null : agentId));
   }, []);
 
+  const triggerAgent = useCallback(
+    async (agentId: string, agentName: string, taskId: string, taskTitle: string, taskDescription: string | null) => {
+      setTriggeringAgent(agentId);
+      try {
+        const res = await fetch("/api/trigger-agent", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${INGEST_KEY}`,
+          },
+          body: JSON.stringify({
+            agent_id: agentId,
+            task_title: taskTitle,
+            task_description: taskDescription || undefined,
+            task_id: taskId,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          toast.success(`${agentName} triggered!`);
+        } else {
+          toast.error(`Couldn't trigger ${agentName}: ${data.error}`);
+        }
+      } catch {
+        toast.error(`Failed to reach ${agentName}`);
+      } finally {
+        setTriggeringAgent(null);
+      }
+    },
+    []
+  );
+
   const handleTaskStatusChange = useCallback(
-    async (taskId: string, newStatus: string) => {
+    async (taskId: string, newStatus: string, agentId?: string, agentName?: string, taskTitle?: string, taskDescription?: string | null) => {
       await updateTask(taskId, {
         status: newStatus,
         ...(newStatus === "done" ? { completed_at: new Date().toISOString() } : {}),
       });
       refetchTasks();
+
+      // If starting a task, trigger the agent
+      if (newStatus === "in_progress" && agentId && taskTitle) {
+        await triggerAgent(agentId, agentName || agentId, taskId, taskTitle, taskDescription || null);
+      }
     },
-    [updateTask, refetchTasks]
+    [updateTask, refetchTasks, triggerAgent]
   );
+
+  // Pending clarifications
+  const pendingClarifications = useMemo(() => {
+    const map = new Map<string, Activity>();
+    activities
+      .filter((a) => a.activity_type === "clarification" && a.status !== "actioned")
+      .forEach((a) => {
+        const taskId = (a.metadata as Record<string, string>)?.task_id;
+        if (taskId) map.set(taskId, a);
+      });
+    return map;
+  }, [activities]);
+
+  // Clarifications per agent
+  const agentClarifications = useMemo(() => {
+    const map = new Map<string, Activity[]>();
+    pendingClarifications.forEach((clar) => {
+      const list = map.get(clar.agent_id) || [];
+      list.push(clar);
+      map.set(clar.agent_id, list);
+    });
+    return map;
+  }, [pendingClarifications]);
 
   const { agentCards, totalWeek, totalOutputs } = useMemo(() => {
     const weekAgo = new Date(Date.now() - 7 * 24 * 3600000);
 
     const cards = agentRoster.map((agent) => {
-      const agentActivities = activities.filter((a) => a.agent_id === agent.agentId);
+      const agentActivities = activities.filter((a) => a.agent_id === agent.agentId && a.activity_type !== "clarification");
       const weekActivities = agentActivities.filter((a) => new Date(a.created_at) >= weekAgo);
       const lastActivityTime = agentActivities[0]?.created_at;
 
@@ -234,6 +359,7 @@ export default function AgentsPage() {
 
       const timing = getTimingStatus(lastActivityTime);
       const isWorking = !!currentTask || timing.pulse;
+      const clarifications = agentClarifications.get(agent.agentId) || [];
 
       return {
         ...agent,
@@ -247,16 +373,18 @@ export default function AgentsPage() {
         allOutputs: agentActivities,
         recentOutputs: agentActivities.slice(0, 3),
         tasksThisWeek: weekActivities.length,
+        clarifications,
       };
     });
 
     return {
       agentCards: cards,
       totalWeek: cards.reduce((sum, a) => sum + a.tasksThisWeek, 0),
-      totalOutputs: activities.length,
+      totalOutputs: activities.filter((a) => a.activity_type !== "clarification").length,
     };
-  }, [activities, tasks]);
+  }, [activities, tasks, agentClarifications]);
 
+  const totalClarifications = pendingClarifications.size;
   const unassignedTasks = tasks.filter((t) => !t.assigned_agent && t.status !== "done");
 
   if (isLoading) {
@@ -269,7 +397,6 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-6 max-w-[1400px]">
-      {/* Quick Task Modal */}
       {taskModalAgent && (
         <QuickTaskModal
           agentId={taskModalAgent.id}
@@ -287,14 +414,24 @@ export default function AgentsPage() {
             {agentRoster.length} agents &middot; {agentCards.filter((a) => a.isWorking).length} working &middot; {totalWeek} outputs this week &middot; {totalOutputs} total
           </p>
         </div>
-        <Link
-          href="/tasks"
-          className="flex items-center gap-2 text-sm font-medium text-teal-600 hover:text-teal-700 transition-colors"
-        >
-          <ListTodo className="w-4 h-4" />
-          Manage Tasks
-          <ArrowRight className="w-3.5 h-3.5" />
-        </Link>
+        <div className="flex items-center gap-3">
+          {totalClarifications > 0 && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+              <Bell className="w-4 h-4 text-amber-600 animate-bounce" />
+              <span className="text-sm font-medium text-amber-800">
+                {totalClarifications} clarification{totalClarifications > 1 ? "s" : ""} needed
+              </span>
+            </div>
+          )}
+          <Link
+            href="/tasks"
+            className="flex items-center gap-2 text-sm font-medium text-teal-600 hover:text-teal-700 transition-colors"
+          >
+            <ListTodo className="w-4 h-4" />
+            Manage Tasks
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
       </div>
 
       {/* Unassigned tasks alert */}
@@ -314,16 +451,39 @@ export default function AgentsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {agentCards.map((agent) => {
           const isExpanded = expandedAgent === agent.agentId;
+          const isBeingTriggered = triggeringAgent === agent.agentId;
+          const hasClarifications = agent.clarifications.length > 0;
 
           return (
             <div
               key={agent.agentId}
               className={cn(
                 "bg-white rounded-xl border overflow-hidden transition-all",
-                agent.isWorking ? "border-teal-300 shadow-md" : "border-border",
+                agent.isWorking || isBeingTriggered ? "border-teal-300 shadow-md" : hasClarifications ? "border-amber-300 shadow-md" : "border-border",
                 isExpanded ? "shadow-xl ring-1 ring-teal-200" : "hover:shadow-lg"
               )}
             >
+              {/* Working progress bar animation */}
+              {(agent.isWorking || isBeingTriggered) && (
+                <div className="h-1 bg-gradient-to-r from-teal-400 via-teal-500 to-teal-400 animate-shimmer bg-[length:200%_100%]" />
+              )}
+
+              {/* Clarification banner */}
+              {hasClarifications && (
+                <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2">
+                  <MessageCircleQuestion className="w-4 h-4 text-amber-600 animate-bounce" />
+                  <span className="text-xs font-medium text-amber-800">
+                    Asking for clarification on a task
+                  </span>
+                  <Link
+                    href="/tasks"
+                    className="ml-auto text-[10px] font-bold text-amber-700 bg-amber-200 px-2 py-0.5 rounded-full hover:bg-amber-300 transition-colors"
+                  >
+                    Respond
+                  </Link>
+                </div>
+              )}
+
               {/* Clickable Agent Header */}
               <button
                 onClick={() => toggleAgent(agent.agentId)}
@@ -332,10 +492,16 @@ export default function AgentsPage() {
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className={cn(
-                      "w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-colors",
-                      agent.isWorking ? "bg-teal-50" : "bg-slate-50"
+                      "w-11 h-11 rounded-xl flex items-center justify-center text-lg transition-all relative",
+                      agent.isWorking || isBeingTriggered ? "bg-teal-50 scale-110" : "bg-slate-50"
                     )}>
-                      {agent.emoji}
+                      <span className={cn(agent.isWorking && "animate-bounce")} style={{ animationDuration: "2s" }}>
+                        {agent.emoji}
+                      </span>
+                      {/* Activity ring animation */}
+                      {(agent.isWorking || isBeingTriggered) && (
+                        <div className="absolute inset-0 rounded-xl border-2 border-teal-400 animate-ping opacity-30" />
+                      )}
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-navy-500">{agent.name}</h3>
@@ -343,20 +509,21 @@ export default function AgentsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <div className="relative">
-                        <div className={cn("w-2.5 h-2.5 rounded-full", agent.timing.dotColor)} />
-                        {agent.timing.pulse && (
-                          <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
-                        )}
+                    {agent.isWorking || isBeingTriggered ? (
+                      <WorkingAnimation />
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <div className="relative">
+                          <div className={cn("w-2.5 h-2.5 rounded-full", agent.timing.dotColor)} />
+                          {agent.timing.pulse && (
+                            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
+                          )}
+                        </div>
+                        <span className="text-[10px] font-medium text-muted-foreground">
+                          {agent.timing.label}
+                        </span>
                       </div>
-                      <span className={cn(
-                        "text-[10px] font-medium",
-                        agent.isWorking ? "text-teal-600" : "text-muted-foreground"
-                      )}>
-                        {agent.isWorking ? "Working" : agent.timing.label}
-                      </span>
-                    </div>
+                    )}
                     <ChevronDown className={cn(
                       "w-4 h-4 text-muted-foreground transition-transform",
                       isExpanded && "rotate-180"
@@ -416,14 +583,22 @@ export default function AgentsPage() {
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-medium rounded-lg hover:bg-teal-700 transition-colors"
                     >
                       <Plus className="w-3 h-3" />
-                      Assign Task
+                      Assign & Run
                     </button>
                     {agent.queuedTasks.length > 0 && !agent.currentTask && (
                       <button
-                        onClick={() => handleTaskStatusChange(agent.queuedTasks[0].id, "in_progress")}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                        onClick={() => {
+                          const task = agent.queuedTasks[0];
+                          handleTaskStatusChange(task.id, "in_progress", agent.agentId, agent.name, task.title, task.description);
+                        }}
+                        disabled={isBeingTriggered}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                       >
-                        <Play className="w-3 h-3" />
+                        {isBeingTriggered ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Play className="w-3 h-3" />
+                        )}
                         Start Next Task
                       </button>
                     )}
@@ -438,6 +613,32 @@ export default function AgentsPage() {
                     )}
                   </div>
 
+                  {/* Clarification requests */}
+                  {agent.clarifications.length > 0 && (
+                    <div className="px-4 py-3 border-b border-border/30 bg-amber-50/50">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <MessageCircleQuestion className="w-3.5 h-3.5 text-amber-600" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Needs Your Input</span>
+                      </div>
+                      {agent.clarifications.map((clar) => (
+                        <div key={clar.id} className="bg-white rounded-lg border border-amber-200 p-2.5 mb-1.5">
+                          <p className="text-xs font-medium text-amber-900">{clar.title}</p>
+                          {clar.full_content && (
+                            <p className="text-[11px] text-amber-800 mt-1 bg-amber-50 rounded px-2 py-1.5">
+                              {clar.full_content}
+                            </p>
+                          )}
+                          <Link
+                            href="/tasks"
+                            className="inline-block mt-1.5 text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded hover:bg-amber-200 transition-colors"
+                          >
+                            Go to task &rarr;
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Task Queue */}
                   {agent.queuedTasks.length > 0 && (
                     <div className="px-4 py-3 border-b border-border/30">
@@ -449,8 +650,9 @@ export default function AgentsPage() {
                         {agent.queuedTasks.map((task) => (
                           <div key={task.id} className="flex items-center gap-2 group/task">
                             <button
-                              onClick={() => handleTaskStatusChange(task.id, "in_progress")}
-                              className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center hover:bg-blue-50 hover:border-blue-300 transition-colors flex-shrink-0"
+                              onClick={() => handleTaskStatusChange(task.id, "in_progress", agent.agentId, agent.name, task.title, task.description)}
+                              disabled={!!agent.currentTask || isBeingTriggered}
+                              className="w-5 h-5 rounded border border-slate-300 flex items-center justify-center hover:bg-blue-50 hover:border-blue-300 transition-colors flex-shrink-0 disabled:opacity-30"
                               title="Start task"
                             >
                               <Play className="w-2.5 h-2.5 text-slate-400 group-hover/task:text-blue-500" />
@@ -580,48 +782,51 @@ export default function AgentsPage() {
           <div className="relative">
             <div className="absolute left-[19px] top-0 bottom-0 w-px bg-border" />
             <div className="space-y-0.5">
-              {activities.slice(0, 15).map((activity, i) => {
-                const agent = agentRoster.find((a) => a.agentId === activity.agent_id);
-                const badgeColor = typeColor[activity.activity_type] || "bg-slate-100 text-slate-600";
-                const isFirst = i === 0;
-                return (
-                  <div key={activity.id} className="relative flex items-start gap-3 pl-10 py-2.5">
-                    <div className={cn(
-                      "absolute left-[14px] top-[16px] w-[11px] h-[11px] rounded-full border-2 border-white z-10",
-                      isFirst ? "bg-teal-500" : "bg-slate-300"
-                    )} />
-                    <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-sm flex-shrink-0">
-                      {agent?.emoji || "🤖"}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold text-navy-500">{agent?.name || activity.agent_id}</span>
-                        <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-medium", badgeColor)}>
-                          {activity.activity_type.replace(/_/g, " ")}
-                        </span>
+              {activities
+                .filter((a) => a.activity_type !== "clarification")
+                .slice(0, 15)
+                .map((activity, i) => {
+                  const agent = agentRoster.find((a) => a.agentId === activity.agent_id);
+                  const badgeColor = typeColor[activity.activity_type] || "bg-slate-100 text-slate-600";
+                  const isFirst = i === 0;
+                  return (
+                    <div key={activity.id} className="relative flex items-start gap-3 pl-10 py-2.5">
+                      <div className={cn(
+                        "absolute left-[14px] top-[16px] w-[11px] h-[11px] rounded-full border-2 border-white z-10",
+                        isFirst ? "bg-teal-500" : "bg-slate-300"
+                      )} />
+                      <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-sm flex-shrink-0">
+                        {agent?.emoji || "🤖"}
                       </div>
-                      <p className="text-sm font-medium text-navy-500 mt-0.5">{activity.title}</p>
-                      {activity.summary && (
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{activity.summary}</p>
-                      )}
-                      {activity.full_content && (
-                        <details className="mt-1">
-                          <summary className="text-[11px] text-teal-600 cursor-pointer hover:text-teal-700 font-medium">
-                            View full output
-                          </summary>
-                          <pre className="mt-1 text-[11px] text-navy-400 whitespace-pre-wrap bg-white rounded-lg p-3 max-h-48 overflow-y-auto border border-border/50">
-                            {activity.full_content}
-                          </pre>
-                        </details>
-                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-navy-500">{agent?.name || activity.agent_id}</span>
+                          <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-medium", badgeColor)}>
+                            {activity.activity_type.replace(/_/g, " ")}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium text-navy-500 mt-0.5">{activity.title}</p>
+                        {activity.summary && (
+                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{activity.summary}</p>
+                        )}
+                        {activity.full_content && (
+                          <details className="mt-1">
+                            <summary className="text-[11px] text-teal-600 cursor-pointer hover:text-teal-700 font-medium">
+                              View full output
+                            </summary>
+                            <pre className="mt-1 text-[11px] text-navy-400 whitespace-pre-wrap bg-white rounded-lg p-3 max-h-48 overflow-y-auto border border-border/50">
+                              {activity.full_content}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground flex-shrink-0 pt-0.5">
+                        <Clock className="w-3 h-3" />
+                        {formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground flex-shrink-0 pt-0.5">
-                      <Clock className="w-3 h-3" />
-                      {formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
         ) : (
