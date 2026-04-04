@@ -139,9 +139,10 @@ export async function POST(request: NextRequest) {
     if (isInfraRoutine) {
       const healthStatus = metadata?.health_status || "unknown";
       const alertCount = Array.isArray(metadata?.alerts) ? metadata.alerts.length : 0;
-      const hour = new Date().getUTCHours(); // UTC
-      // Morning window: 7-9 UTC, Afternoon: 14-16 UTC (adjust for your timezone)
-      const isSummaryWindow = (hour >= 7 && hour < 9) || (hour >= 14 && hour < 16);
+      const hour = new Date().getUTCHours();
+      // CET = UTC+1 (CEST = UTC+2 in summer). Morning 8-9am CET, Afternoon 2-3pm CET
+      // UTC equivalents: Morning 6-8 UTC, Afternoon 12-14 UTC (covers both CET/CEST)
+      const isSummaryWindow = (hour >= 6 && hour < 8) || (hour >= 12 && hour < 14);
       const isUrgent = healthStatus === "degraded" || healthStatus === "critical" || alertCount > 0;
 
       if (!isUrgent && !isSummaryWindow) {
