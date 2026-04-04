@@ -148,8 +148,10 @@ function QuickTaskModal({
           }),
         });
         const data = await res.json();
-        if (data.ok) {
+        if (data.ok && !data.queued) {
           toast.success(`${agentName} is now working on it!`);
+        } else if (data.ok && data.queued) {
+          toast.success(`Task queued — ${agentName} will pick it up shortly`);
         } else {
           toast.warning(`Task created but couldn't trigger ${agentName}: ${data.error}`);
         }
@@ -290,8 +292,10 @@ export default function AgentsPage() {
           }),
         });
         const data = await res.json();
-        if (data.ok) {
-          toast.success(`${agentName} triggered!`);
+        if (data.ok && !data.queued) {
+          toast.success(`${agentName} is working on it!`);
+        } else if (data.ok && data.queued) {
+          toast.success(`Task queued for ${agentName} — will pick it up shortly`);
         } else {
           toast.error(`Couldn't trigger ${agentName}: ${data.error}`);
         }
