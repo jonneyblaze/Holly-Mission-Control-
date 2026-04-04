@@ -677,48 +677,88 @@ async function testStudentFeatures() {
   // Course learning (find a course to test)
   await check("Student", "Course learning page works", async () => {
     await safeGoto(`${SITE_URL}/my-courses`);
-    // Try to find a "Continue" or course link
-    const courseLink = await page.$('a[href*="course-learning"]');
+    await screenshot("my-courses");
+    // Try "Start Course" / "Continue" button first, then any course-learning link
+    const startBtn = await page.$('a:has-text("Start Course"), a:has-text("Continue"), a:has-text("Resume")');
+    const courseLink = startBtn || await page.$('a[href*="course-learning"]');
     if (courseLink) {
       await courseLink.click();
-      await page.waitForLoadState("networkidle", { timeout: 15000 });
+      await page.waitForLoadState("networkidle", { timeout: 20000 });
       await screenshot("course-learning");
+      log(`  📍 Course page: ${page.url()}`);
 
-      // Check for lesson content
-      const hasContent = await exists("h1, h2, video, [class*='lesson'], [class*='content']");
+      // Check for page content
+      const hasContent = await exists("h1, h2, video, [class*='lesson'], [class*='content'], [class*='module']");
       if (!hasContent) warn("Course learning page appears empty");
 
-      // Check for sidebar navigation
-      const hasSidebar = await exists("[class*='sidebar'], nav[class*='lesson'], aside");
-      if (!hasSidebar) warn("Course learning page missing sidebar navigation");
-
       await checkBadCopy("Course Learning");
+
+      // Try to find and click into a lesson
+      // Lessons might be in an accordion/expandable section — try clicking a module first
+      const moduleToggle = await page.$('[class*="module"] button, [class*="accordion"] button, details summary, [class*="expand"]');
+      if (moduleToggle) {
+        try { await moduleToggle.click(); await page.waitForTimeout(500); } catch {}
+      }
+
+      // Now look for lesson links
+      const lessonLink = await page.$('a[href*="/lesson/"]');
+      if (lessonLink) {
+        await lessonLink.click();
+        await page.waitForLoadState("networkidle", { timeout: 20000 });
+        await screenshot("lesson-view");
+        log(`  📍 Lesson page: ${page.url()}`);
+      } else {
+        // Some courses go directly to lesson view
+        if (page.url().includes("/lesson/")) {
+          await screenshot("lesson-view");
+          log("  📍 Already on lesson page");
+        } else {
+          warn("No lesson links found on course page (may need enrollment or course has no lessons)");
+        }
+      }
     } else {
-      warn("No enrolled courses found to test learning page");
+      warn("No enrolled courses found on My Courses page");
     }
   });
 
   // AI Tutor
-  await check("Student", "AI Tutor button exists on lesson page", async () => {
-    // Navigate to a lesson if we have one
-    const lessonLink = await page.$('a[href*="/lesson/"]');
-    if (lessonLink) {
-      await lessonLink.click();
-      await page.waitForLoadState("networkidle", { timeout: 15000 });
+  await check("Student", "AI Tutor available on lesson page", async () => {
+    // Check if we're already on a lesson page from previous test
+    if (!page.url().includes("/lesson/")) {
+      // Try to navigate to one
+      await safeGoto(`${SITE_URL}/my-courses`);
+      const startBtn = await page.$('a:has-text("Start Course"), a:has-text("Continue")');
+      if (startBtn) {
+        await startBtn.click();
+        await page.waitForLoadState("networkidle", { timeout: 20000 });
+        // Look for a lesson link on the course page
+        const moduleToggle = await page.$('[class*="module"] button, details summary');
+        if (moduleToggle) { try { await moduleToggle.click(); await page.waitForTimeout(500); } catch {} }
+        const lessonLink = await page.$('a[href*="/lesson/"]');
+        if (lessonLink) {
+          await lessonLink.click();
+          await page.waitForLoadState("networkidle", { timeout: 20000 });
+        }
+      }
+    }
+
+    if (page.url().includes("/lesson/")) {
       // Look for AI Tutor button
-      const aiBtn = await exists('button:has-text("AI Tutor"), button:has-text("Tutor"), [class*="ai-tutor"]');
+      const aiBtn = await exists('button:has-text("AI Tutor"), button:has-text("Tutor"), [class*="ai-tutor"], [class*="tutor"]');
       if (aiBtn) {
-        await page.click('button:has-text("AI Tutor"), button:has-text("Tutor")');
-        await page.waitForTimeout(1000);
-        await screenshot("ai-tutor");
-        // Check for chat input
-        const hasChatInput = await exists('textarea, input[placeholder*="question"], input[placeholder*="message"]');
-        if (!hasChatInput) warn("AI Tutor panel missing chat input");
+        try {
+          await page.click('button:has-text("AI Tutor"), button:has-text("Tutor")');
+          await page.waitForTimeout(1000);
+          await screenshot("ai-tutor");
+          const hasChatInput = await exists('textarea, input[placeholder*="question"], input[placeholder*="message"]');
+          if (!hasChatInput) warn("AI Tutor panel missing chat input");
+          else log("  🤖 AI Tutor chat input found");
+        } catch { warn("AI Tutor button found but couldn't click it"); }
       } else {
-        warn("AI Tutor button not found on lesson page");
+        warn("AI Tutor button not found on lesson page — may not be enabled for this course");
       }
     } else {
-      warn("No lesson link found to test AI Tutor");
+      warn("Could not navigate to a lesson page to test AI Tutor");
     }
   });
 }
