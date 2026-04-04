@@ -1,9 +1,11 @@
 "use client";
 
-import { Bell, Search, RefreshCw, LogOut } from "lucide-react";
+import { Search, RefreshCw, LogOut, Shield } from "lucide-react";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import NotificationBell from "./NotificationBell";
+import Link from "next/link";
 
 export default function Topbar() {
   const [refreshing, setRefreshing] = useState(false);
@@ -46,11 +48,18 @@ export default function Topbar() {
             }`}
           />
         </button>
-        <button className="p-2 rounded-lg hover:bg-muted transition-colors relative">
-          <Bell className="w-4 h-4 text-muted-foreground" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-teal-500 rounded-full" />
-        </button>
-        <div className="w-8 h-8 rounded-full bg-navy-500 flex items-center justify-center ml-2">
+
+        <NotificationBell />
+
+        <Link
+          href="/settings"
+          className="p-2 rounded-lg hover:bg-muted transition-colors"
+          title="Security settings"
+        >
+          <Shield className="w-4 h-4 text-muted-foreground" />
+        </Link>
+
+        <div className="w-8 h-8 rounded-full bg-navy-500 flex items-center justify-center ml-1">
           <span className="text-xs font-bold text-white">SM</span>
         </div>
         <button

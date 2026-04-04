@@ -16,6 +16,7 @@ import {
   DollarSign,
   MessageSquare,
   Archive,
+  Shield,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -34,6 +35,7 @@ const navigation = [
   { name: "Finance", href: "/finance", icon: DollarSign },
   { name: "Feedback", href: "/feedback", icon: MessageSquare },
   { name: "Reports", href: "/reports", icon: Archive },
+  { name: "Security", href: "/settings", icon: Shield },
 ];
 
 export default function Sidebar() {
