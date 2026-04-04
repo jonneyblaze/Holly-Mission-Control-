@@ -18,8 +18,8 @@ set -euo pipefail
 # ---------- Config ----------
 MC_INGEST_URL="${MC_INGEST_URL:-https://holly-mission-control-backend.vercel.app/api/ingest}"
 MC_API_KEY="${MC_API_KEY:-9eRse679@ohyEdCz&UAUL@V9V6t*xW@%47r4vQfFeThowllEBsIv}"
-PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
-ALERTMANAGER_URL="${ALERTMANAGER_URL:-http://localhost:9093}"
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://10.0.1.100:9090}"
+ALERTMANAGER_URL="${ALERTMANAGER_URL:-http://10.0.1.100:9093}"
 
 echo "[$(date -Iseconds)] Starting infrastructure monitor..."
 
