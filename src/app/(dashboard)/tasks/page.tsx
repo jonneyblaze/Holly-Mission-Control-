@@ -603,6 +603,7 @@ function ClarificationCard({
   const [sending, setSending] = useState(false);
   const { update: updateActivity } = useMCUpdate("agent_activity");
   const { update: updateTask } = useMCUpdate("tasks");
+  const { insert: insertTask } = useMCInsert("tasks");
 
   const agentName = agentLabels[clarification.agent_id] || clarification.agent_id;
 
@@ -613,8 +614,8 @@ function ClarificationCard({
       // Mark clarification as actioned
       await updateActivity(clarification.id, { status: "actioned" });
 
-      // If there's a matching task, append the clarification Q&A to description and re-trigger
       if (matchingTask) {
+        // Has a linked task — append Q&A to description and re-trigger
         const updatedDesc = [
           matchingTask.description || "",
           `\n---\n**${agentName} asked:** ${clarification.full_content || clarification.summary || clarification.title}`,
@@ -626,7 +627,6 @@ function ClarificationCard({
           status: "in_progress",
         });
 
-        // Re-trigger the agent with updated context
         try {
           await triggerAgentAPI(
             clarification.agent_id,
@@ -639,12 +639,43 @@ function ClarificationCard({
           toast.warning("Response saved but couldn't re-trigger agent");
         }
       } else {
-        // No matching task — just mark as actioned
-        toast.success("Clarification dismissed");
+        // No linked task — create one from the clarification context + response, then trigger
+        const taskTitle = clarification.title || `Task for ${agentName}`;
+        const taskDesc = [
+          `**Original task context:** ${clarification.summary || clarification.title}`,
+          `\n---\n**${agentName} asked:** ${clarification.full_content || clarification.summary || clarification.title}`,
+          `**Response:** ${response.trim()}`,
+        ].join("\n");
+
+        try {
+          const newTask = await insertTask({
+            title: taskTitle,
+            description: taskDesc,
+            status: "in_progress",
+            priority: "medium",
+            assigned_agent: clarification.agent_id,
+            source: "clarification",
+          });
+
+          if (newTask?.id) {
+            await triggerAgentAPI(
+              clarification.agent_id,
+              newTask.id,
+              taskTitle,
+              taskDesc
+            );
+            toast.success(`Task created & ${agentName} is working on it`);
+          } else {
+            toast.success("Response recorded");
+          }
+        } catch {
+          toast.warning("Clarification answered but couldn't create task");
+        }
       }
 
       onResponded();
-    } catch {
+    } catch (err) {
+      console.error("Clarification respond error:", err);
       toast.error("Failed to send response");
     } finally {
       setSending(false);

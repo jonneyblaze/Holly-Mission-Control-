@@ -108,6 +108,13 @@ export function useMCInsert(table: string) {
   return { insert, loading };
 }
 
+// Tables that have an updated_at column
+const TABLES_WITH_UPDATED_AT = new Set([
+  "tasks",
+  "social_posts",
+  "kb_gaps",
+]);
+
 // Update Mission Control table
 export function useMCUpdate(table: string) {
   const supabase = createClient();
@@ -116,9 +123,13 @@ export function useMCUpdate(table: string) {
   const update = async (id: string, data: Record<string, unknown>) => {
     setLoading(true);
     try {
+      const payload = TABLES_WITH_UPDATED_AT.has(table)
+        ? { ...data, updated_at: new Date().toISOString() }
+        : data;
+
       const { data: result, error } = await supabase
         .from(table)
-        .update({ ...data, updated_at: new Date().toISOString() })
+        .update(payload)
         .eq("id", id)
         .select()
         .single();
