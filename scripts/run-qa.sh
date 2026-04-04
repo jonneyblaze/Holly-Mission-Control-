@@ -16,6 +16,9 @@ set -euo pipefail
 echo "[$(date -Iseconds)] Starting FULL QA browser suite..."
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Load credentials from env file (if exists)
+[ -f "${SCRIPT_DIR}/qa-env.sh" ] && source "${SCRIPT_DIR}/qa-env.sh"
 SCREENSHOTS_DIR="/tmp/qa-screenshots"
 rm -rf "$SCREENSHOTS_DIR" && mkdir -p "$SCREENSHOTS_DIR"
 

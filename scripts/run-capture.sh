@@ -14,6 +14,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p /tmp/qa-screenshots
 
+# Load credentials from env file (if exists)
+[ -f "${SCRIPT_DIR}/qa-env.sh" ] && source "${SCRIPT_DIR}/qa-env.sh"
+
 docker run --rm \
   --name holly-flow-capture \
   --network host \
