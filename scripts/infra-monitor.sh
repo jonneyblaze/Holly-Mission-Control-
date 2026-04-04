@@ -135,11 +135,11 @@ PROM_UP=false
 if curl -sf "${PROMETHEUS_URL}/api/v1/query?query=up" -o /dev/null 2>/dev/null; then
   PROM_UP=true
 
-  # Build Prometheus metrics JSON safely using jq
+  # Instant queries
   PROM_METRICS=$(jq -n '{}')
   for pair in \
     "container_cpu_usage:sum by (name) (rate(container_cpu_usage_seconds_total{name!=\"\"}[5m]) * 100)" \
-    "node_cpu_seconds:100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)" \
+    "node_cpu_pct:100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)" \
     "node_memory_available:node_memory_MemAvailable_bytes"; do
 
     key="${pair%%:*}"
@@ -148,6 +148,30 @@ if curl -sf "${PROMETHEUS_URL}/api/v1/query?query=up" -o /dev/null 2>/dev/null; 
     data=$(echo "$result" | jq -c '.data.result // []' 2>/dev/null || echo '[]')
     PROM_METRICS=$(echo "$PROM_METRICS" | jq --arg k "$key" --argjson v "$data" '. + {($k): $v}')
   done
+
+  # Time-series (last 2 hours, 5-min steps) for charts
+  END_TS=$(date +%s)
+  START_TS=$((END_TS - 7200))
+  CHARTS=$(jq -n '{}')
+  for pair in \
+    "cpu:100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)" \
+    "memory:(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100" \
+    "disk_io:rate(node_disk_read_bytes_total{device=~\"sd.*|nvme.*\"}[5m]) + rate(node_disk_written_bytes_total{device=~\"sd.*|nvme.*\"}[5m])" \
+    "network:rate(node_network_receive_bytes_total{device!=\"lo\"}[5m]) + rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m])"; do
+
+    key="${pair%%:*}"
+    query="${pair#*:}"
+    result=$(curl -sf "${PROMETHEUS_URL}/api/v1/query_range" \
+      --data-urlencode "query=$query" \
+      --data-urlencode "start=$START_TS" \
+      --data-urlencode "end=$END_TS" \
+      --data-urlencode "step=300" 2>/dev/null || echo '{"data":{"result":[]}}')
+
+    # Extract values as [{t: timestamp, v: value}]
+    data=$(echo "$result" | jq -c '[.data.result[0].values[]? | {t: .[0], v: (.[1] | tonumber | . * 100 | round / 100)}]' 2>/dev/null || echo '[]')
+    CHARTS=$(echo "$CHARTS" | jq --arg k "$key" --argjson v "$data" '. + {($k): $v}')
+  done
+  PROM_METRICS=$(echo "$PROM_METRICS" | jq --argjson charts "$CHARTS" '. + {charts: $charts}')
 
   echo "  Prometheus: OK"
 else

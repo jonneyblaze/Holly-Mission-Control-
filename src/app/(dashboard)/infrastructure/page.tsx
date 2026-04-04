@@ -28,6 +28,15 @@ import {
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { ViewOutputButton } from "@/components/dashboard/ContentModal";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from "recharts";
 
 // ---------- Types ----------
 interface Container {
@@ -88,7 +97,15 @@ interface InfraSnapshot {
   system_uptime?: string;
   prometheus_up?: boolean;
   alertmanager_up?: boolean;
-  prometheus?: Record<string, unknown>;
+  prometheus?: {
+    charts?: {
+      cpu?: { t: number; v: number }[];
+      memory?: { t: number; v: number }[];
+      disk_io?: { t: number; v: number }[];
+      network?: { t: number; v: number }[];
+    };
+    [key: string]: unknown;
+  };
 }
 
 interface AgentActivity {
@@ -318,9 +335,72 @@ function ServicePill({ name, up, url }: { name: string; up: boolean; url?: strin
   );
 }
 
+// ---------- Prometheus Chart ----------
+function PrometheusChart({ data, title, color, unit, domain }: {
+  data: { t: number; v: number }[];
+  title: string;
+  color: string;
+  unit?: string;
+  domain?: [number, number];
+}) {
+  if (!data || data.length === 0) return null;
+
+  const chartData = data.map((d) => ({
+    time: d.t * 1000,
+    value: d.v,
+  }));
+
+  return (
+    <div className="bg-white rounded-xl border border-border p-4">
+      <h3 className="text-xs font-semibold text-navy-500 mb-3">{title}</h3>
+      <ResponsiveContainer width="100%" height={140}>
+        <AreaChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id={`grad-${title}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={color} stopOpacity={0.05} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis
+            dataKey="time"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            tickFormatter={(ts) => format(new Date(ts), "HH:mm")}
+            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            domain={domain || ["auto", "auto"]}
+            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            axisLine={false}
+            tickLine={false}
+            width={35}
+            tickFormatter={(v) => `${Math.round(v)}${unit || ""}`}
+          />
+          <Tooltip
+            contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid #e2e8f0" }}
+            labelFormatter={(ts) => format(new Date(ts as number), "HH:mm:ss")}
+            formatter={(v) => [`${Number(v).toFixed(1)}${unit || ""}`, title]}
+          />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={color}
+            strokeWidth={2}
+            fill={`url(#grad-${title})`}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // ---------- Main Page ----------
 export default function InfrastructurePage() {
   const [showAllReports, setShowAllReports] = useState(false);
+  const [containersExpanded, setContainersExpanded] = useState(false);
 
   // Structured snapshots
   const { data: snapshots, loading: snapshotsLoading } = useMCTable<InfraSnapshot>("infra_snapshots", {
@@ -350,6 +430,9 @@ export default function InfrastructurePage() {
   const alertmanagerUp = meta.alertmanager_up ?? false;
   const cpuUsage = meta.cpu_usage || null;
   const arrayDisk = meta.array_disk_usage || null;
+
+  // Prometheus time-series charts
+  const charts = latest?.prometheus?.charts || null;
 
   // Container counts
   const containers = latest?.containers || [];
@@ -590,18 +673,78 @@ export default function InfrastructurePage() {
         </div>
       )}
 
-      {/* Container Grid */}
-      {hasData && (
+      {/* Prometheus Charts */}
+      {charts && (charts.cpu?.length || charts.memory?.length) && (
         <div>
           <h2 className="text-sm font-semibold text-navy-500 mb-3 flex items-center gap-2">
-            <Server className="w-4 h-4 text-teal-600" />
-            Containers ({runningContainers}/{totalContainers} running)
+            <Gauge className="w-4 h-4 text-teal-600" />
+            Live Metrics (Last 2 Hours)
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {sortedContainers.map((c) => (
-              <ContainerCard key={c.name} container={c} />
-            ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {charts.cpu && charts.cpu.length > 0 && (
+              <PrometheusChart data={charts.cpu} title="CPU Usage" color="#14b8a6" unit="%" domain={[0, 100]} />
+            )}
+            {charts.memory && charts.memory.length > 0 && (
+              <PrometheusChart data={charts.memory} title="Memory Usage" color="#3b82f6" unit="%" domain={[0, 100]} />
+            )}
+            {charts.disk_io && charts.disk_io.length > 0 && (
+              <PrometheusChart data={charts.disk_io} title="Disk I/O" color="#f59e0b" unit=" B/s" />
+            )}
+            {charts.network && charts.network.length > 0 && (
+              <PrometheusChart data={charts.network} title="Network Traffic" color="#8b5cf6" unit=" B/s" />
+            )}
           </div>
+        </div>
+      )}
+
+      {/* Container Grid (Collapsible) */}
+      {hasData && (
+        <div>
+          <button
+            onClick={() => setContainersExpanded(!containersExpanded)}
+            className="w-full flex items-center justify-between mb-3 group"
+          >
+            <h2 className="text-sm font-semibold text-navy-500 flex items-center gap-2">
+              <Server className="w-4 h-4 text-teal-600" />
+              Containers ({runningContainers}/{totalContainers} running)
+              {stoppedContainers > 0 && (
+                <span className="text-[10px] font-medium text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">
+                  {stoppedContainers} stopped
+                </span>
+              )}
+            </h2>
+            <div className="flex items-center gap-2">
+              {!containersExpanded && (
+                <div className="flex gap-0.5">
+                  {sortedContainers.slice(0, 20).map((c) => (
+                    <div
+                      key={c.name}
+                      className={cn("w-2 h-2 rounded-full",
+                        c.status === "running" ? "bg-emerald-400" :
+                        c.status === "restarting" ? "bg-amber-400" :
+                        "bg-red-400"
+                      )}
+                      title={`${c.name}: ${c.status}`}
+                    />
+                  ))}
+                  {sortedContainers.length > 20 && (
+                    <span className="text-[9px] text-muted-foreground ml-1">+{sortedContainers.length - 20}</span>
+                  )}
+                </div>
+              )}
+              {containersExpanded
+                ? <ChevronUp className="w-4 h-4 text-muted-foreground group-hover:text-navy-500 transition-colors" />
+                : <ChevronDown className="w-4 h-4 text-muted-foreground group-hover:text-navy-500 transition-colors" />
+              }
+            </div>
+          </button>
+          {containersExpanded && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+              {sortedContainers.map((c) => (
+                <ContainerCard key={c.name} container={c} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
