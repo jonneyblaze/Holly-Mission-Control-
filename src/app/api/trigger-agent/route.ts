@@ -25,13 +25,14 @@ export async function POST(request: NextRequest) {
 
     const prompt = buildPrompt(agent_id, task_title, task_description, task_id);
 
-    // Try direct OpenClaw API call first (works from LAN)
+    // Try direct OpenClaw API call with streaming
+    // We use stream:true so we get an immediate response confirming the agent started,
+    // then we don't wait for the full completion
     let triggered = false;
-    let agentResponse = "";
 
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
+      const timeout = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch(OPENCLAW_URL, {
         method: "POST",
@@ -47,24 +48,43 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           model: `openclaw:${agent_id}`,
           messages: [{ role: "user", content: prompt }],
+          stream: true,
         }),
         signal: controller.signal,
       });
 
       clearTimeout(timeout);
 
-      if (response.ok) {
-        const data = await response.json();
-        agentResponse = data?.choices?.[0]?.message?.content || "";
+      // If we get a 200 with streaming, the agent has started
+      if (response.ok && response.body) {
+        triggered = true;
+        // Don't await the full stream — just confirm it started
+        // The agent will complete in the background and POST results to /api/ingest
+        try {
+          const reader = response.body.getReader();
+          // Read just the first chunk to confirm streaming started
+          const { value } = await reader.read();
+          if (value) {
+            triggered = true;
+          }
+          // Cancel the stream — we don't need to wait for the full response
+          reader.cancel();
+        } catch {
+          // Stream read failed but response was ok, agent likely started
+          triggered = true;
+        }
+      } else if (response.ok) {
+        // Non-streaming 200 response
         triggered = true;
       }
-    } catch {
-      // Direct call failed (likely Cloudflare Access or network issue)
-      console.log("[trigger-agent] Direct OpenClaw call failed, queueing via Supabase");
+    } catch (err) {
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      if (!isAbort) {
+        console.log("[trigger-agent] Direct OpenClaw call failed, queueing via Supabase");
+      }
     }
 
     // If direct call failed, queue the trigger via Supabase
-    // Agents poll this table via their cron jobs
     if (!triggered) {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -72,7 +92,6 @@ export async function POST(request: NextRequest) {
       if (supabaseUrl && serviceKey) {
         const supabase = createClient(supabaseUrl, serviceKey);
 
-        // Log as agent_activity so agents can find it
         await supabase.from("agent_activity").insert({
           agent_id,
           activity_type: "trigger",
@@ -103,7 +122,7 @@ export async function POST(request: NextRequest) {
       queued: false,
       agent_id,
       task_id,
-      response: agentResponse.substring(0, 500),
+      message: "Agent triggered — working on it now",
     });
   } catch (err) {
     console.error("[trigger-agent] Error:", err);
