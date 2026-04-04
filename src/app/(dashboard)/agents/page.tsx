@@ -245,13 +245,66 @@ function QuickTaskModal({
 function WorkingAnimation() {
   return (
     <div className="flex items-center gap-1.5">
-      <div className="flex gap-0.5">
-        <div className="w-1 h-3 bg-teal-400 rounded-full animate-pulse" style={{ animationDelay: "0ms", animationDuration: "1s" }} />
-        <div className="w-1 h-4 bg-teal-500 rounded-full animate-pulse" style={{ animationDelay: "200ms", animationDuration: "1s" }} />
-        <div className="w-1 h-2.5 bg-teal-400 rounded-full animate-pulse" style={{ animationDelay: "400ms", animationDuration: "1s" }} />
-        <div className="w-1 h-3.5 bg-teal-500 rounded-full animate-pulse" style={{ animationDelay: "600ms", animationDuration: "1s" }} />
+      <div className="flex gap-0.5 items-end h-4">
+        {[0, 150, 300, 450].map((delay, i) => (
+          <div
+            key={i}
+            className="w-1 bg-teal-500 rounded-full"
+            style={{
+              animation: `equalizer 0.8s ease-in-out ${delay}ms infinite alternate`,
+              height: "40%",
+            }}
+          />
+        ))}
       </div>
-      <span className="text-[10px] font-bold text-teal-600 uppercase tracking-wider">Working</span>
+      <span className="text-[10px] font-bold text-teal-600 uppercase tracking-wider animate-pulse">Working</span>
+      <style jsx>{`
+        @keyframes equalizer {
+          0% { height: 20%; }
+          100% { height: 100%; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ---------- Idle Breathing Animation ----------
+function IdleBreathing() {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="w-2 h-2 rounded-full bg-slate-300 animate-pulse" style={{ animationDuration: "3s" }} />
+      <span className="text-[10px] text-slate-400">Idle</span>
+    </div>
+  );
+}
+
+// ---------- Recent Activity Sparkline ----------
+function ActivitySparkline({ activities }: { activities: Activity[] }) {
+  const now = Date.now();
+  const hours = 24;
+  const buckets = new Array(hours).fill(0);
+
+  activities.forEach((a) => {
+    const hoursAgo = (now - new Date(a.created_at).getTime()) / 3600000;
+    if (hoursAgo < hours) {
+      buckets[Math.floor(hoursAgo)] += 1;
+    }
+  });
+
+  const max = Math.max(1, ...buckets);
+
+  return (
+    <div className="flex items-end gap-px h-3" title="Activity last 24h (newest → oldest)">
+      {buckets.map((count, i) => (
+        <div
+          key={i}
+          className={cn(
+            "w-[3px] rounded-t-sm transition-all",
+            count > 0 ? "bg-teal-400" : "bg-slate-200"
+          )}
+          style={{ height: `${Math.max(15, (count / max) * 100)}%` }}
+        />
+      ))}
     </div>
   );
 }
@@ -521,10 +574,12 @@ export default function AgentsPage() {
                   <div className="flex items-center gap-2">
                     {agent.isWorking || isBeingTriggered ? (
                       <WorkingAnimation />
+                    ) : agent.timing.label === "Never run" ? (
+                      <IdleBreathing />
                     ) : (
                       <div className="flex items-center gap-1.5">
                         <div className="relative">
-                          <div className={cn("w-2.5 h-2.5 rounded-full", agent.timing.dotColor)} />
+                          <div className={cn("w-2.5 h-2.5 rounded-full transition-colors", agent.timing.dotColor)} />
                           {agent.timing.pulse && (
                             <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
                           )}
@@ -535,7 +590,7 @@ export default function AgentsPage() {
                       </div>
                     )}
                     <ChevronDown className={cn(
-                      "w-4 h-4 text-muted-foreground transition-transform",
+                      "w-4 h-4 text-muted-foreground transition-transform duration-200",
                       isExpanded && "rotate-180"
                     )} />
                   </div>
@@ -560,9 +615,12 @@ export default function AgentsPage() {
                       <span className="text-muted-foreground">done</span>
                     </div>
                   )}
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide ml-auto">
-                    {agent.model}
-                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    <ActivitySparkline activities={agent.allOutputs} />
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                      {agent.model}
+                    </span>
+                  </div>
                 </div>
               </button>
 
