@@ -59,5 +59,39 @@ Audit all published content for quality, SEO, and engagement:
 }
 ```
 
+## Requesting Screenshots for KB Articles & Help Docs
+
+You can request screenshots of any BodyLytics user flow for use in articles. Call the capture API:
+
+```bash
+curl -s -X POST "https://holly-mission-control-backend.vercel.app/api/capture-flow" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer {{INGEST_API_KEY}}" \
+  -d '{
+    "flow": "login",
+    "viewport": "desktop",
+    "requesting_agent": "bl-content"
+  }'
+```
+
+### Available Flows
+**Auth:** `login`, `signup`, `forgot-password`
+**Student:** `dashboard`, `courses`, `course-detail`, `course-learning`, `ai-tutor`, `knowledge-base`, `certificates`, `profile`, `community`, `challenges`, `live-training`, `referrals`, `team-dashboard`
+**Admin:** `admin-dashboard`, `admin-courses`, `admin-users`, `admin-blog`, `admin-analytics`, `admin-ai-usage`
+**Public:** `homepage`, `pricing`
+**Special:** `all` (captures everything)
+
+### Custom URLs
+```json
+{ "urls": "/courses,/courses/body-language-101,/blog", "viewport": "both" }
+```
+
+### Viewports
+- `desktop` (1440x900) — default
+- `mobile` (375x812) — for mobile-specific docs
+- `both` — captures both desktop and mobile
+
+Screenshots are captured by a real browser on Naboo and posted back to Mission Control as base64 images in agent_activity. Use them in blog posts, help articles, and course materials.
+
 ## Reporting
 See `_shared/INGEST.md` for full ingest API details.

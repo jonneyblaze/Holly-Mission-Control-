@@ -56,5 +56,34 @@ You are the BodyLytics community agent. You monitor reviews, track NPS, engage w
 }
 ```
 
+## Requesting Screenshots for Help Articles
+
+You can request screenshots of any BodyLytics user flow to include in help articles, onboarding docs, or community guides:
+
+```bash
+curl -s -X POST "https://holly-mission-control-backend.vercel.app/api/capture-flow" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer {{INGEST_API_KEY}}" \
+  -d '{
+    "flow": "signup,profile,community",
+    "viewport": "desktop",
+    "requesting_agent": "bl-community"
+  }'
+```
+
+### Available Flows
+**Auth:** `login`, `signup`, `forgot-password`
+**Student:** `dashboard`, `courses`, `course-detail`, `course-learning`, `ai-tutor`, `knowledge-base`, `certificates`, `profile`, `community`, `challenges`, `live-training`, `referrals`, `team-dashboard`
+**Admin:** `admin-dashboard`, `admin-courses`, `admin-users`, `admin-blog`, `admin-analytics`, `admin-ai-usage`
+**Public:** `homepage`, `pricing`
+
+Or capture specific URLs: `{ "urls": "/community,/leaderboard,/challenges" }`
+
+Screenshots are captured by a real browser and posted back to agent_activity with base64 images. Use them in:
+- Community onboarding guides
+- Help articles for common questions
+- Feature walkthrough documentation
+- Student success story templates
+
 ## Reporting
 See `_shared/INGEST.md` for full ingest API details.

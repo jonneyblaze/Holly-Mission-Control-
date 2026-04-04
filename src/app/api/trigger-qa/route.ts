@@ -12,10 +12,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json().catch(() => ({}));
-    const testEmail = body.test_email || "";
-    const testPassword = body.test_password || "";
-
     // Trigger via the smoke-test endpoint (HTTP-level, runs on Vercel)
     // The full browser suite runs on Naboo via cron or manual SSH
     // This endpoint runs the quick HTTP checks immediately
