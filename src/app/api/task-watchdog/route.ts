@@ -134,9 +134,18 @@ export async function GET(request: NextRequest) {
         }
       } catch { /* feedback is optional */ }
 
-      const prompt = `TASK REMINDER (retry ${triggerCount + 1}): ${task.title}${
+      const isSubAgent = task.assigned_agent !== "holly";
+      const delegation = isSubAgent
+        ? `\n\nDELEGATE TO: ${task.assigned_agent} — Spawn this as a sub-agent using sessions_spawn. Monitor its progress and report back to Mission Control when complete.`
+        : "";
+
+      const prompt = `MISSION CONTROL TASK REMINDER (retry ${triggerCount + 1}): ${task.title}${
         task.description ? `\n\nDetails: ${task.description}` : ""
-      }\n\nTask ID: ${task.id} — This task was assigned to you but no completion was received. Please complete it now and POST your result to Mission Control's /api/ingest endpoint with activity_type "task_complete" and metadata: {"task_id": "${task.id}"}${feedbackContext}
+      }${delegation}\n\nTask ID: ${task.id} — This task was assigned but no completion was received. ${
+        isSubAgent
+          ? `Spawn the ${task.assigned_agent} sub-agent to handle it.`
+          : "Complete it now."
+      } POST the result to Mission Control's /api/ingest endpoint with activity_type "task_complete" and metadata: {"task_id": "${task.id}"}${feedbackContext}
 
 IMPORTANT: You MUST complete this task and POST your result. If you cannot complete it, POST a clarification request with activity_type "clarification" explaining what you need.`;
 
@@ -162,19 +171,20 @@ IMPORTANT: You MUST complete this task and POST your result. If you cannot compl
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
 
+        // Always route through Holly — she orchestrates sub-agents
         const response = await fetch(OPENCLAW_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${OPENCLAW_TOKEN}`,
-            "x-openclaw-agent-id": task.assigned_agent,
+            "x-openclaw-agent-id": "holly",
             ...(process.env.CF_ACCESS_CLIENT_ID && {
               "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
               "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET || "",
             }),
           },
           body: JSON.stringify({
-            model: `openclaw:${task.assigned_agent}`,
+            model: "openclaw:holly",
             messages: [{ role: "user", content: prompt }],
           }),
           signal: controller.signal,

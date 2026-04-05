@@ -57,19 +57,21 @@ export async function POST(request: NextRequest) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
 
+      // Always route through Holly (orchestrator) — she spawns and monitors sub-agents.
+      // Sending directly to sub-agents creates standalone sessions Holly can't see.
       const response = await fetch(OPENCLAW_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${OPENCLAW_TOKEN}`,
-          "x-openclaw-agent-id": agent_id,
+          "x-openclaw-agent-id": "holly",
           ...(process.env.CF_ACCESS_CLIENT_ID && {
             "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
             "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET || "",
           }),
         },
         body: JSON.stringify({
-          model: `openclaw:${agent_id}`,
+          model: "openclaw:holly",
           messages: [{ role: "user", content: prompt }],
         }),
         signal: controller.signal,
@@ -202,9 +204,20 @@ async function buildPrompt(
   // Fetch learning context from past feedback
   const feedbackContext = await fetchAgentFeedback(agentId);
 
-  return `TASK ASSIGNED: ${taskTitle}${desc}${taskRef}${feedbackContext}
+  // If the task is assigned to a sub-agent (not holly herself), tell Holly to delegate
+  const isSubAgent = agentId !== "holly";
+  const delegation = isSubAgent
+    ? `\n\nDELEGATE TO: ${agentId} — Spawn this as a sub-agent using sessions_spawn. Monitor its progress and report back to Mission Control when complete.`
+    : "";
 
-Please complete this task now. When finished, POST your result to Mission Control using the curl command from your SOUL.md instructions. Use activity_type "task_complete" and include a title, summary, and full_content with your results. The task will automatically be moved to review.
+  return `MISSION CONTROL TASK: ${taskTitle}${desc}${delegation}${taskRef}${feedbackContext}
 
-If you need more information to complete this task, POST a clarification request to Mission Control with activity_type "clarification" and metadata: {"task_id": "${taskId || "unknown"}"} — you may only ask for clarification ONCE.`;
+${isSubAgent
+    ? `Spawn the ${agentId} sub-agent to handle this task. Monitor it and when the sub-agent finishes, POST the result to Mission Control using the /api/ingest endpoint with activity_type "task_complete". Include a title, summary, and full_content with the results.`
+    : `Complete this task now. When finished, POST your result to Mission Control's /api/ingest endpoint with activity_type "task_complete". Include a title, summary, and full_content with your results.`
+  }
+
+The task will automatically be moved to review in the Kanban board.
+
+If you need more information, POST a clarification request to Mission Control with activity_type "clarification" and metadata: {"task_id": "${taskId || "unknown"}"} — you may only ask for clarification ONCE.`;
 }
