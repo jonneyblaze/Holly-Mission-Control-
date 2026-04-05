@@ -553,7 +553,12 @@ export default function AgentsPage() {
       const workStartedAt = currentTask?.updated_at || currentTask?.created_at || lastTrigger?.created_at;
 
       const timing = getTimingStatus(lastActivityTime);
-      const isWorking = !!currentTask || timing.pulse;
+      // Working = has a task in_progress. We deliberately do NOT OR in
+      // timing.pulse (recent activity) because task_complete counts as
+      // activity and would keep the animation running for 5 minutes after
+      // the agent actually finished. timing.pulse is still used for the
+      // status dot colour separately.
+      const isWorking = !!currentTask;
       const clarifications = agentClarifications.get(agent.agentId) || [];
 
       return {

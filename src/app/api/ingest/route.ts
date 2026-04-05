@@ -167,24 +167,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Suppress routine infra_snapshot activity entries — only log to feed when:
-    // 1. Health is degraded/critical (something is wrong)
-    // 2. There are active alerts
-    // 3. It's a morning (7-9am) or afternoon (14-16pm) summary window
-    // The infra_snapshots table ALWAYS gets the data (above) — this just controls the activity feed noise.
+    // Suppress routine infra_snapshot activity entries — the infra agent polls
+    // every 5 minutes and was flooding the notification feed with "healthy"
+    // entries. We still write every snapshot to the infra_snapshots table
+    // above (that's the time-series data warehouse for dashboards). We only
+    // log to the activity feed when something actually needs attention:
+    //   - health is degraded or critical, OR
+    //   - there are active alerts
+    // Routine healthy snapshots are invisible to the feed by design.
     const isInfraRoutine = activity_type === "infra_snapshot";
     let skipActivityLog = false;
 
     if (isInfraRoutine) {
       const healthStatus = metadata?.health_status || "unknown";
       const alertCount = Array.isArray(metadata?.alerts) ? metadata.alerts.length : 0;
-      const hour = new Date().getUTCHours();
-      // CET = UTC+1 (CEST = UTC+2 in summer). Morning 8-9am CET, Afternoon 2-3pm CET
-      // UTC equivalents: Morning 6-8 UTC, Afternoon 12-14 UTC (covers both CET/CEST)
-      const isSummaryWindow = (hour >= 6 && hour < 8) || (hour >= 12 && hour < 14);
-      const isUrgent = healthStatus === "degraded" || healthStatus === "critical" || alertCount > 0;
+      const isUrgent =
+        healthStatus === "degraded" || healthStatus === "critical" || alertCount > 0;
 
-      if (!isUrgent && !isSummaryWindow) {
+      if (!isUrgent) {
         skipActivityLog = true;
       }
     }
