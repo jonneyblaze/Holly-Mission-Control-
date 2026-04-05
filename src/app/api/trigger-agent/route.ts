@@ -4,6 +4,10 @@ import { createClient } from "@supabase/supabase-js";
 const OPENCLAW_URL = process.env.OPENCLAW_GATEWAY_URL || "https://openclaw.naboo.network/v1/chat/completions";
 const OPENCLAW_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || "";
 
+// Holly's direct call can take ~15s (Gemini 2.5 Pro via OpenClaw tunnel).
+// Allow up to 30s for the whole function to avoid premature serverless termination.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   const apiKey = process.env.INGEST_API_KEY;
@@ -55,7 +59,9 @@ export async function POST(request: NextRequest) {
     let directTriggered = false;
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      // Holly on Gemini 2.5 Pro typically takes 10-15s to acknowledge;
+      // 25s gives comfortable headroom within Vercel's function budget.
+      const timeout = setTimeout(() => controller.abort(), 25000);
 
       // Always route through Holly (orchestrator) — she spawns and monitors sub-agents.
       // Sending directly to sub-agents creates standalone sessions Holly can't see.

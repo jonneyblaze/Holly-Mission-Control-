@@ -16,6 +16,10 @@ const MAX_RETRIES = 3; // Don't retry more than 3 times
 const OPENCLAW_URL = process.env.OPENCLAW_GATEWAY_URL || "https://openclaw.naboo.network/v1/chat/completions";
 const OPENCLAW_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || "";
 
+// Watchdog may re-trigger multiple stuck tasks; give it headroom for Holly's
+// ~15s per-call latency plus DB queries.
+export const maxDuration = 60;
+
 export async function GET(request: NextRequest) {
   // Auth: either Vercel Cron secret or INGEST_API_KEY
   const authHeader = request.headers.get("authorization");
@@ -169,7 +173,9 @@ IMPORTANT: You MUST complete this task and POST your result. If you cannot compl
       // Try direct OpenClaw call (best-effort)
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
+        // Holly on Gemini 2.5 Pro typically takes 10-15s to acknowledge;
+        // 25s gives comfortable headroom within Vercel's function budget.
+        const timeout = setTimeout(() => controller.abort(), 25000);
 
         // Always route through Holly — she orchestrates sub-agents
         const response = await fetch(OPENCLAW_URL, {
