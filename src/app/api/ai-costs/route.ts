@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 
 /**
  * AI Cost Tracker API
- * Fetches usage/spend from OpenRouter + OpenAI + Anthropic
+ * Fetches usage/spend from OpenRouter + Anthropic, plus Ollama status via
+ * the infra agent heartbeat (Naboo can't be reached directly from Vercel).
  *
  * Required env vars:
  *   OPENROUTER_API_KEY  — OpenRouter API key
- *   OPENAI_API_KEY      — OpenAI API key (optional, for health check)
  *   ANTHROPIC_API_KEY   — Anthropic API key (optional, for health check)
  */
 
@@ -81,91 +81,6 @@ async function checkOpenRouter(): Promise<ProviderStatus> {
   } catch (err) {
     return {
       provider: "OpenRouter",
-      status: "error",
-      error: err instanceof Error ? err.message : "Unknown error",
-    };
-  }
-}
-
-async function checkOpenAI(): Promise<ProviderStatus> {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return { provider: "OpenAI", status: "no_key" };
-
-  try {
-    // Health check — verify key is valid
-    const res = await fetch("https://api.openai.com/v1/models?limit=1", {
-      headers: { Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (res.status === 401) {
-      return { provider: "OpenAI", status: "error", error: "Invalid API key (401)" };
-    }
-    if (res.status === 429) {
-      return { provider: "OpenAI", status: "limit_exceeded", error: "Rate limited (429)" };
-    }
-    if (!res.ok) {
-      return { provider: "OpenAI", status: "error", error: `HTTP ${res.status}` };
-    }
-
-    // Try to fetch actual usage/cost data
-    const now = Math.floor(Date.now() / 1000);
-    const dayAgo = now - 86400;
-    const weekAgo = now - 604800;
-    const monthAgo = now - 2592000;
-
-    let usageDaily: number | undefined;
-    let usageWeekly: number | undefined;
-    let usageMonthly: number | undefined;
-
-    try {
-      // Attempt costs API (requires api.usage.read scope)
-      const [dayRes, weekRes, monthRes] = await Promise.all([
-        fetch(`https://api.openai.com/v1/organization/costs?start_time=${dayAgo}&end_time=${now}`, {
-          headers: { Authorization: `Bearer ${key}` },
-          signal: AbortSignal.timeout(5000),
-        }),
-        fetch(`https://api.openai.com/v1/organization/costs?start_time=${weekAgo}&end_time=${now}`, {
-          headers: { Authorization: `Bearer ${key}` },
-          signal: AbortSignal.timeout(5000),
-        }),
-        fetch(`https://api.openai.com/v1/organization/costs?start_time=${monthAgo}&end_time=${now}`, {
-          headers: { Authorization: `Bearer ${key}` },
-          signal: AbortSignal.timeout(5000),
-        }),
-      ]);
-
-      if (dayRes.ok && weekRes.ok && monthRes.ok) {
-        const parseCosts = async (r: Response) => {
-          const j = await r.json();
-          // Sum all cost buckets (cents → dollars)
-          const buckets = j.data || [];
-          return buckets.reduce((sum: number, b: { results?: { amount?: { value?: number } }[] }) => {
-            return sum + (b.results || []).reduce((s: number, r: { amount?: { value?: number } }) => s + (r.amount?.value ?? 0), 0);
-          }, 0) / 100;
-        };
-
-        usageDaily = Math.round(await parseCosts(dayRes) * 100) / 100;
-        usageWeekly = Math.round(await parseCosts(weekRes) * 100) / 100;
-        usageMonthly = Math.round(await parseCosts(monthRes) * 100) / 100;
-      }
-    } catch {
-      // Costs API not available — key lacks api.usage.read scope
-    }
-
-    return {
-      provider: "OpenAI",
-      status: "active",
-      usage: usageMonthly,
-      usageDaily,
-      usageWeekly,
-      usageMonthly,
-      models: ["gpt-4.1-mini", "gpt-4.1", "o4-mini"],
-      error: usageDaily === undefined ? "Add api.usage.read scope to key for cost tracking" : undefined,
-    };
-  } catch (err) {
-    return {
-      provider: "OpenAI",
       status: "error",
       error: err instanceof Error ? err.message : "Unknown error",
     };
@@ -321,14 +236,13 @@ async function checkOllama(): Promise<ProviderStatus> {
 }
 
 export async function GET() {
-  const [openrouter, openai, anthropic, ollama] = await Promise.all([
+  const [openrouter, anthropic, ollama] = await Promise.all([
     checkOpenRouter(),
-    checkOpenAI(),
     checkAnthropic(),
     checkOllama(),
   ]);
 
-  const providers = [openrouter, openai, anthropic, ollama];
+  const providers = [openrouter, anthropic, ollama];
 
   // Build warnings
   const warnings: string[] = [];

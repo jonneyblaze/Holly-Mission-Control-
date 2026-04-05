@@ -1278,21 +1278,14 @@ export default function InfrastructurePage() {
                     <td className="py-1.5 text-muted-foreground">Gemini 2.5 Flash/Pro, DeepSeek V3</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 pr-3"><span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded">2</span></td>
-                    <td className="py-1.5 pr-3 font-medium text-navy-500">OpenAI</td>
-                    <td className="py-1.5 pr-3 text-muted-foreground">Gateway + fallback</td>
-                    <td className="py-1.5 pr-3 text-muted-foreground">Pay-per-token</td>
-                    <td className="py-1.5 text-muted-foreground">gpt-4.1-mini (gateway), gpt-4.1, o4-mini</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1.5 pr-3"><span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded">3</span></td>
+                    <td className="py-1.5 pr-3"><span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded">2</span></td>
                     <td className="py-1.5 pr-3 font-medium text-navy-500">Anthropic</td>
-                    <td className="py-1.5 pr-3 text-muted-foreground">Standby (key expired)</td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">Standby (direct API)</td>
                     <td className="py-1.5 pr-3 text-muted-foreground">Pay-per-token (most expensive)</td>
                     <td className="py-1.5 text-muted-foreground">Claude Opus 4, Sonnet 4, Haiku 4</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 pr-3"><span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">4</span></td>
+                    <td className="py-1.5 pr-3"><span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">3</span></td>
                     <td className="py-1.5 pr-3 font-medium text-navy-500">Ollama (Local)</td>
                     <td className="py-1.5 pr-3 text-muted-foreground">Free fallback + bulk + private</td>
                     <td className="py-1.5 pr-3 font-medium text-emerald-600">$0 forever</td>
@@ -1302,8 +1295,8 @@ export default function InfrastructurePage() {
               </table>
               <div className="mt-3 pt-2 border-t border-slate-200">
                 <p className="text-[10px] text-muted-foreground">
-                  <span className="font-semibold text-navy-500">Agent chain:</span> OpenRouter → OpenAI → DeepSeek → Ollama &nbsp;|&nbsp;
-                  <span className="font-semibold text-navy-500">Gateway chain:</span> OpenAI → OpenAI (premium) → OpenRouter → Ollama
+                  <span className="font-semibold text-navy-500">Agent chain:</span> OpenRouter → Anthropic → Ollama &nbsp;|&nbsp;
+                  <span className="font-semibold text-navy-500">Gateway chain:</span> OpenRouter → Ollama
                 </p>
               </div>
             </div>

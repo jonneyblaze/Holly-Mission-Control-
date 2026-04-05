@@ -266,7 +266,7 @@ export default function DashboardPage() {
           </div>
           <div className="bg-white rounded-xl border border-border overflow-hidden">
             {activities.length > 0 ? (
-              <RecentActivity activities={activities} />
+              <RecentActivity activities={activities.slice(0, 5)} />
             ) : (
               <div className="p-6 text-center text-sm text-muted-foreground">
                 No agent activity yet. Activities appear as agents POST to the ingest API.
