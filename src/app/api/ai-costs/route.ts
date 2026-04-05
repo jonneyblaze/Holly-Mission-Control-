@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetchAnthropicMtdCost } from "@/lib/anthropic-admin";
 
 /**
  * AI Cost Tracker API
@@ -89,7 +90,24 @@ async function checkOpenRouter(): Promise<ProviderStatus> {
 
 async function checkAnthropic(): Promise<ProviderStatus> {
   const key = process.env.ANTHROPIC_API_KEY;
+  const adminKey = process.env.ANTHROPIC_ADMIN_API_KEY;
   if (!key) return { provider: "Anthropic", status: "no_key" };
+
+  // If an admin key is available, enrich the response with real MTD cost
+  // data from the cost_report endpoint. The inference key can only do a
+  // health-check ping; the admin key is what exposes $ spend.
+  let usageMonthly: number | undefined;
+  let usageDaily: number | undefined;
+  if (adminKey) {
+    try {
+      const snap = await fetchAnthropicMtdCost(adminKey);
+      usageMonthly = snap.total_usd;
+      // "Today" = the latest bucket (Anthropic returns daily buckets).
+      usageDaily = snap.buckets.at(-1)?.total_usd ?? 0;
+    } catch {
+      // Fall through to health check — we still want the card to render.
+    }
+  }
 
   try {
     // Simple health check — hit messages endpoint with minimal request
@@ -130,6 +148,9 @@ async function checkAnthropic(): Promise<ProviderStatus> {
         provider: "Anthropic",
         status: "active",
         models: ["claude-opus-4", "claude-sonnet-4", "claude-haiku-4"],
+        usageDaily,
+        usageMonthly,
+        usage: usageMonthly,
       };
     }
 

@@ -12,6 +12,20 @@ interface HistoryRow {
   snapshot: BudgetSnapshotMetadata;
 }
 
+interface ProviderBreakdown {
+  openrouter: { mtd_usd: number; limit_usd: number };
+  anthropic: {
+    mtd_usd: number;
+    error: string | null;
+    buckets: Array<{
+      starting_at: string;
+      ending_at: string;
+      total_usd: number;
+      by_model: Record<string, number>;
+    }>;
+  };
+}
+
 interface BudgetState {
   ok: boolean;
   live_error: string | null;
@@ -20,6 +34,8 @@ interface BudgetState {
   tier_colour: "green" | "amber" | "red" | null;
   last_snapshot: HistoryRow | null;
   history: HistoryRow[];
+  providers?: ProviderBreakdown;
+  combined_mtd_usd?: number;
 }
 
 const TIER_COPY: Record<BudgetTier, { heading: string; detail: string }> = {
@@ -208,6 +224,67 @@ export default function BudgetPage() {
             icon={TrendingUp}
             accentColor="teal"
           />
+        </div>
+      )}
+
+      {/* Per-provider spend breakdown — OpenRouter + Anthropic direct */}
+      {state?.providers && (
+        <div className="bg-white rounded-xl border border-border p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-montserrat font-bold text-navy-500">
+                Spend by provider
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Month-to-date across all AI providers
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-bold text-navy-500">
+                ${(state.combined_mtd_usd ?? 0).toFixed(2)}
+              </div>
+              <div className="text-xs text-muted-foreground">combined MTD</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  OpenRouter
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  hard cap ${state.providers.openrouter.limit_usd.toFixed(0)}
+                </span>
+              </div>
+              <div className="text-xl font-bold text-navy-500">
+                ${state.providers.openrouter.mtd_usd.toFixed(2)}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">
+                Routes Sonnet, Gemini Flash, Haiku, DeepSeek
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Anthropic (direct)
+                </span>
+                {state.providers.anthropic.error && (
+                  <span
+                    className="text-[10px] text-amber-600"
+                    title={state.providers.anthropic.error}
+                  >
+                    admin key issue
+                  </span>
+                )}
+              </div>
+              <div className="text-xl font-bold text-navy-500">
+                ${state.providers.anthropic.mtd_usd.toFixed(2)}
+              </div>
+              <div className="text-[10px] text-muted-foreground mt-0.5">
+                Failover bypass when OpenRouter is unavailable
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
