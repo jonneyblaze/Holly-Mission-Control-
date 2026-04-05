@@ -1548,6 +1548,51 @@ export default function TasksPage() {
                                 )}
                               </p>
 
+                              {/* Never-triggered warning for todo tasks with an assigned agent */}
+                              {task.status === "todo" && task.assigned_agent && (() => {
+                                const triggerCount = allActivity.filter(
+                                  (a) => a.metadata?.task_id === task.id && a.activity_type === "trigger"
+                                ).length;
+                                if (triggerCount > 0) return null;
+                                const age = getTaskAge(task);
+                                // Only flag if sitting > 2 minutes (avoid flicker on brand-new cards)
+                                if (age.minutes < 2) return null;
+                                return (
+                                  <div className="mt-2 pt-2 border-t border-amber-200">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <Zap className="w-3 h-3 text-amber-600 flex-shrink-0" />
+                                        <span className="text-[10px] font-medium text-amber-700 truncate">
+                                          Never triggered · {age.label}
+                                        </span>
+                                      </div>
+                                      <button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          try {
+                                            await triggerAgentAPI(
+                                              task.assigned_agent!,
+                                              task.id,
+                                              task.title,
+                                              task.description || undefined
+                                            );
+                                            toast.success("Agent triggered — working on it now");
+                                            refetch();
+                                          } catch {
+                                            toast.error("Failed to trigger agent");
+                                          }
+                                        }}
+                                        className="flex items-center gap-1 text-[10px] font-semibold text-white bg-amber-500 hover:bg-amber-600 px-2 py-0.5 rounded transition-colors flex-shrink-0"
+                                        title="Fire agent trigger now"
+                                      >
+                                        <Zap className="w-2.5 h-2.5" />
+                                        Trigger
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
                               {/* Stuck indicator for in_progress tasks */}
                               {task.status === "in_progress" && task.assigned_agent && (() => {
                                 const age = getTaskAge(task);
@@ -1638,6 +1683,38 @@ export default function TasksPage() {
                                   <Pencil className="w-3.5 h-3.5 text-teal-500" />
                                   Edit task
                                 </button>
+
+                                {/* Trigger Agent — fires /api/trigger-agent for this task */}
+                                {task.assigned_agent && (
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      setOpenMenu(null);
+                                      try {
+                                        const result = await triggerAgentAPI(
+                                          task.assigned_agent!,
+                                          task.id,
+                                          task.title,
+                                          task.description || undefined
+                                        );
+                                        if (result?.directTriggered) {
+                                          toast.success("Agent triggered — working on it now");
+                                        } else if (result?.queued) {
+                                          toast.success("Queued — agent will pick it up shortly");
+                                        } else {
+                                          toast.error("Trigger failed");
+                                        }
+                                        refetch();
+                                      } catch {
+                                        toast.error("Failed to trigger agent");
+                                      }
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs hover:bg-amber-50 flex items-center gap-2 text-amber-700"
+                                  >
+                                    <Zap className="w-3.5 h-3.5 text-amber-500" />
+                                    Trigger agent
+                                  </button>
+                                )}
 
                                 <div className="border-t border-border my-1" />
 
