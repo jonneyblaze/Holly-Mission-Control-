@@ -103,13 +103,14 @@ log "Backup written to $backup"
 tmp="$(mktemp)"
 # agents.list is an array of { id, model, ... } — map over it and replace
 # the model field per the tier's assignment table. Unknown ids are left alone.
+# Do NOT add unknown root-level keys (OpenClaw's config schema is strict and
+# will reject them, crash-looping the container).
 jq \
   --arg holly "$holly" \
   --arg qa "$qa" \
   --arg devops "$devops" \
   --arg drafter "$drafter" \
   --arg support "$support" \
-  --arg tier "$tier" \
   '
     ( { "holly": $holly,
         "bl-qa": $qa,
@@ -126,13 +127,25 @@ jq \
     | .agents.list |= map(
         if ($map[.id] // null) != null then .model = $map[.id] else . end
       )
-    | ._budget_tier = $tier
   ' "$CONFIG" > "$tmp"
 
 if ! jq empty "$tmp" >/dev/null 2>&1; then
   log "ERROR: jq output invalid — aborting, config untouched"
   rm -f "$tmp"
   exit 1
+fi
+
+# Idempotency guard: if the rewritten config is byte-identical to the live
+# one, don't touch anything (no backup churn, no container restart). This
+# handles first-run when `.last-tier` is empty but the config is already
+# on the right tier.
+if cmp -s "$tmp" "$CONFIG"; then
+  log "Config already on tier=${tier} — no changes, skipping restart."
+  rm -f "$tmp"
+  # Remove the pre-emptive backup we wrote earlier — it's just clutter now.
+  rm -f "$backup"
+  echo "$tier" > "$STATE_FILE"
+  exit 0
 fi
 
 mv "$tmp" "$CONFIG"
