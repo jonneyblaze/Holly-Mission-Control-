@@ -30,6 +30,7 @@ async function handler(request: NextRequest) {
   const isAuthed =
     (apiKey && authHeader === `Bearer ${apiKey}`) ||
     (vercelCronSecret && cronSecret === vercelCronSecret) ||
+    (vercelCronSecret && authHeader === `Bearer ${vercelCronSecret}`) ||
     request.headers.get("host")?.includes("localhost");
   if (!isAuthed) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

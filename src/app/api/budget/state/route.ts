@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+
+// Must be dynamic — hits OpenRouter live + reads the latest DB snapshot.
+// Without this, Vercel prerenders the response at build time and the
+// dashboard shows frozen data forever.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import {
   fetchOpenRouterBudget,
   tierColour,
