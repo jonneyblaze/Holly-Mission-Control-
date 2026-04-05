@@ -26,9 +26,11 @@ export const revalidate = 0;
  *         primary_model,      // primary OR id
  *         fallback_models,    // preference-ordered OR ids, no primary, no last-resort
  *         last_resort_model,  // bare unprefixed last-resort or null (fail-fast tier)
- *         all_models,         // fully-expanded virtual-provider `models[]`
- *                             //   (primary + fallbacks, per-agent labeled,
- *                             //    Anthropic entries carry api+cacheRetention)
+ *         caching_params,     // { cacheRetention } | null — Naboo writes this to
+ *                             //   agents.defaults.models["<prov>/<primary>"].params
+ *         all_models,         // virtual-provider models[] (Anthropic entries
+ *                             //   carry api:"anthropic-messages" to open the
+ *                             //   resolveCacheRetention gate)
  *         api_key,
  *         or_key_hash,
  *         monthly_limit_usd,
@@ -75,16 +77,12 @@ interface VirtualProviderModelEntry {
    * Per-model override of the virtual provider's default `api`. Emitted
    * only when the ModelSpec defines one — currently set on Anthropic
    * entries so OpenClaw's `resolveCacheRetention` gate opens and
-   * `extraParams.cacheRetention` is actually honored.
+   * `cacheRetention` (set under `agents.defaults.models[...]`.params) is
+   * actually honored. Schema accepts this field; `extraParams` here was
+   * rejected — see `caching_params` on the manifest agent for where
+   * cache config actually goes.
    */
   api?: string;
-  /**
-   * Extra model-level params forwarded to the provider. Today we use this
-   * for `cacheRetention: "long"` on Anthropic models — OpenRouter passes
-   * `cache_control` through to Anthropic/Bedrock/Vertex, yielding a 90%
-   * input-cost discount on cache hits.
-   */
-  extraParams?: { cacheRetention?: string };
 }
 
 function buildVirtualProviderModel(
@@ -101,9 +99,6 @@ function buildVirtualProviderModel(
     maxTokens: spec.maxTokens,
   };
   if (spec.api) entry.api = spec.api;
-  if (spec.cacheRetention) {
-    entry.extraParams = { cacheRetention: spec.cacheRetention };
-  }
   return entry;
 }
 
@@ -118,6 +113,15 @@ interface ManifestAgent {
    * Orchestrators send null; fast/drafter tiers send `"ollama/qwen2.5:32b"`.
    */
   last_resort_model: string | null;
+  /**
+   * Params written to `agents.defaults.models["openrouter-<id>/<primary>"].params`
+   * by the Naboo sync script. This is the ONLY valid location for
+   * `cacheRetention` per OpenClaw's `resolveExtraParams` (pi-embedded:18662)
+   * — per-model `extraParams` on virtual provider entries is schema-rejected.
+   * Populated from the primary model's ModelSpec.cacheRetention. Null when
+   * the primary model has no caching config (e.g. Gemini drafters).
+   */
+  caching_params: { cacheRetention: string } | null;
   all_models: VirtualProviderModelEntry[];
   api_key: string | null;
   or_key_hash: string | null;
@@ -177,6 +181,10 @@ export async function GET(request: NextRequest) {
     const allModels = cascade.map((id) =>
       buildVirtualProviderModel(MODEL_SPECS[id], known.id)
     );
+    const primarySpec = MODEL_SPECS[known.model];
+    const cachingParams = primarySpec.cacheRetention
+      ? { cacheRetention: primarySpec.cacheRetention }
+      : null;
 
     const row = rowsByAgent.get(known.id);
     if (!row) {
@@ -186,6 +194,7 @@ export async function GET(request: NextRequest) {
         primary_model: known.model,
         fallback_models: known.fallback_models,
         last_resort_model: known.last_resort_model,
+        caching_params: cachingParams,
         all_models: allModels,
         api_key: null,
         or_key_hash: null,
@@ -213,6 +222,7 @@ export async function GET(request: NextRequest) {
       primary_model: known.model,
       fallback_models: known.fallback_models,
       last_resort_model: known.last_resort_model,
+      caching_params: cachingParams,
       all_models: allModels,
       api_key: apiKey,
       or_key_hash: row.or_key_hash as string,

@@ -110,14 +110,24 @@ WITH_KEYS=$(jq '[.agents[] | select(.api_key != null and .disabled == false)] | 
 #      context. Fast/drafter tiers send `ollama/qwen2.5:32b` for a free
 #      local retry.
 #
-#   3. .agents.defaults.subagents — bump runTimeoutSeconds to 1200 (20
+#   3. .agents.defaults.models — per-model params keyed by
+#      `<provider>/<modelId>`. This is the ONLY schema-valid location
+#      for `cacheRetention` per OpenClaw's `resolveExtraParams`
+#      (pi-embedded-*.js:18662); putting `extraParams` on per-model
+#      entries inside virtual providers is schema-rejected. For every
+#      active agent whose primary model has `caching_params` in the
+#      manifest, write `openrouter-<id>/<primary>: { params: {...} }`.
+#      Strip prior `openrouter-` prefixed entries before re-adding so
+#      agent removals/rotations don't leak stale entries.
+#
+#   4. .agents.defaults.subagents — bump runTimeoutSeconds to 1200 (20
 #      min, up from 5) so long-running subagent tasks like a 30-route
 #      test pass don't trigger cascade on normal runtime. Also delete
 #      any hardcoded `.model` override on subagents so spawned agents
 #      use their own configured per-agent model + virtual provider
 #      instead of inheriting a fleet-wide default that bypasses caps.
 #
-#   4. Missing/disabled agents: strip any stale openrouter-<agent>/
+#   5. Missing/disabled agents: strip any stale openrouter-<agent>/
 #      prefix (string OR object form) so they fall back cleanly to the
 #      shared openrouter provider until a key is provisioned for them.
 CANDIDATE=$(mktemp)
@@ -137,6 +147,19 @@ jq --slurpfile mf "$MANIFEST" '
         models: .all_models
       }
     }) | from_entries)
+  | .agents.defaults.models = (
+      ((.agents.defaults.models // {})
+        | with_entries(select(.key | startswith("openrouter-") | not)))
+      + (
+        $active
+        | map(select(.caching_params != null))
+        | map({
+            key: ("openrouter-" + .agent_id + "/" + .primary_model),
+            value: { params: .caching_params }
+          })
+        | from_entries
+      )
+    )
   | .agents.defaults.subagents.runTimeoutSeconds = 1200
   | if (.agents.defaults.subagents | has("model"))
       then .agents.defaults.subagents |= del(.model)
