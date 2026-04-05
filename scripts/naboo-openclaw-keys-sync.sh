@@ -84,48 +84,75 @@ AGENT_COUNT=$(jq '.agents | length' "$MANIFEST")
 WITH_KEYS=$(jq '[.agents[] | select(.api_key != null and .disabled == false)] | length' "$MANIFEST")
 
 # ---- build candidate config ----
+#
+# Two transformations, driven entirely by the manifest (which is the
+# source of truth — pricing, cascade, labels are all computed by the
+# sync-manifest endpoint, this script just drops them in place):
+#
+#   1. .models.providers — drop every prior openrouter-<agent> virtual
+#      provider, then re-add one per active agent. Each virtual provider
+#      carries the agent's per-agent OR key and its fully-expanded
+#      `models[]` (primary + fallback cascade, per-agent labeled), so
+#      that *every* model the agent can select routes through its own
+#      capped key — not just the primary.
+#
+#   2. .agents.list[].model — for active agents, rewrite to the object
+#      form `{primary, fallbacks}` with both primary and every fallback
+#      prefixed with the agent's virtual provider. OpenClaw's runtime
+#      (resolveAgentModelFallbacksOverride) reads the per-agent override
+#      before the global agents.defaults.model.fallbacks cascade, so
+#      this closes the rogue-agent gap where Gemini-Pro fallbacks used
+#      to leak through the shared openrouter provider.
+#
+#      The last-resort `ollama/qwen2.5:32b` is appended universally —
+#      the manifest deliberately omits it because it's not a per-agent
+#      OR model.
+#
+#   3. Missing/disabled agents: strip any stale openrouter-<agent>/
+#      prefix (string OR object form) so they fall back cleanly to the
+#      shared openrouter provider until a key is provisioned for them.
 CANDIDATE=$(mktemp)
 jq --slurpfile mf "$MANIFEST" '
-  . as $root
-  | ($mf[0].agents | map(select(.api_key != null and .disabled == false))) as $active
+  ($mf[0].agents | map(select(.api_key != null and .disabled == false))) as $active
   | ($mf[0].base_url) as $base
-  # Drop any prior openrouter-<agent> virtual providers (clean slate)
   | .models.providers |= (
       to_entries
       | map(select(.key | startswith("openrouter-") | not))
       | from_entries
     )
-  # Add fresh virtual providers from the manifest
   | .models.providers += ($active | map({
       key: ("openrouter-" + .agent_id),
       value: {
         baseUrl: $base,
         apiKey: .api_key,
-        models: (
-          if .model == "anthropic/claude-sonnet-4.6" then
-            [{id:"anthropic/claude-sonnet-4.6", name:("Claude Sonnet 4.6 (per-agent " + .agent_id + ")"), reasoning:true, input:["text","image"], cost:{input:3,output:15,cacheRead:0.3,cacheWrite:3.75}, contextWindow:200000, maxTokens:64000}]
-          elif .model == "anthropic/claude-haiku-4.5" then
-            [{id:"anthropic/claude-haiku-4.5", name:("Claude Haiku 4.5 (per-agent " + .agent_id + ")"), reasoning:false, input:["text","image"], cost:{input:1,output:5,cacheRead:0.1,cacheWrite:1.25}, contextWindow:200000, maxTokens:64000}]
-          elif .model == "google/gemini-2.5-flash" then
-            [{id:"google/gemini-2.5-flash", name:("Gemini 2.5 Flash (per-agent " + .agent_id + ")"), reasoning:true, input:["text","image"], cost:{input:0.15,output:0.6,cacheRead:0.0375,cacheWrite:0}, contextWindow:1048576, maxTokens:65536}]
-          else
-            []
-          end
-        )
+        models: .all_models
       }
     }) | from_entries)
-  # Rewrite agent .model fields — active ones point at their virtual
-  # provider; missing / disabled ones fall back to the shared provider.
   | .agents.list |= map(
       . as $a
       | ($active | map(select(.agent_id == $a.id)) | first) as $match
       | if $match then
-          .model = ("openrouter-" + $match.agent_id + "/" + $match.model)
+          .model = {
+            primary: ("openrouter-" + $match.agent_id + "/" + $match.primary_model),
+            fallbacks: (
+              ($match.fallback_models | map("openrouter-" + $match.agent_id + "/" + .))
+              + ["ollama/qwen2.5:32b"]
+            )
+          }
         else
-          # Strip any stale openrouter-<agent>/ prefix if key was removed
-          if ($a.model | type == "string") and ($a.model | startswith("openrouter-")) then
-            .model = (($a.model | split("/")[1:] | join("/")))
-          else .
+          # No active key for this agent — revert to bare shared-provider string.
+          if ($a.model | type) == "object" then
+            .model = (
+              ($a.model.primary // "")
+              | if (type == "string") and startswith("openrouter-")
+                then (split("/")[1:] | join("/"))
+                else .
+                end
+            )
+          elif ($a.model | type) == "string" and ($a.model | startswith("openrouter-")) then
+            .model = ($a.model | split("/")[1:] | join("/"))
+          else
+            .
           end
         end
     )
