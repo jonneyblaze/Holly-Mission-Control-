@@ -156,3 +156,152 @@ export async function fetchOpenRouterBudget(apiKey: string): Promise<BudgetSnaps
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+/**
+ * One row from OpenRouter's /api/v1/activity endpoint. The endpoint
+ * returns per-model × per-provider × per-day rows — so the same model
+ * can appear twice in a single day if it was routed through different
+ * providers (e.g. google-ai-studio vs google-vertex/global).
+ */
+export interface OpenRouterActivityRow {
+  date: string;
+  model: string;
+  provider_name: string;
+  usage: number;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens?: number;
+}
+
+/**
+ * Fetch one day of org-level activity from OpenRouter. Requires the
+ * provisioning key (not the runtime key). The `date` argument is a
+ * UTC `YYYY-MM-DD` string and must be within the last 30 completed
+ * UTC days — OpenRouter rejects today's date and anything older than
+ * 30 days with HTTP 400.
+ */
+export async function fetchOpenRouterActivityDay(
+  provisioningKey: string,
+  date: string
+): Promise<OpenRouterActivityRow[]> {
+  const res = await fetch(
+    `https://openrouter.ai/api/v1/activity?date=${encodeURIComponent(date)}`,
+    {
+      headers: { Authorization: `Bearer ${provisioningKey}` },
+      signal: AbortSignal.timeout(10_000),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`OpenRouter /activity ${date} failed: HTTP ${res.status}`);
+  }
+
+  const json = (await res.json()) as { data?: OpenRouterActivityRow[] };
+  return json.data ?? [];
+}
+
+/**
+ * Fetch the last `days` completed UTC days of activity and roll them
+ * up. OpenRouter's endpoint is strictly per-day, so we fan out in
+ * parallel and merge the results. `days=7` is the usual panel window.
+ */
+export async function fetchOpenRouterActivityRange(
+  provisioningKey: string,
+  days: number = 7
+): Promise<{
+  rows: OpenRouterActivityRow[];
+  by_day: Array<{ date: string; usage: number; requests: number }>;
+  by_model: Array<{
+    model: string;
+    usage: number;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+  }>;
+  total_usage: number;
+  total_requests: number;
+}> {
+  // Build the list of UTC dates — skip today (OR only serves completed days).
+  const dates: string[] = [];
+  const now = new Date();
+  for (let i = 1; i <= days; i++) {
+    const d = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate() - i
+    ));
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  const results = await Promise.allSettled(
+    dates.map((d) => fetchOpenRouterActivityDay(provisioningKey, d))
+  );
+
+  const rows: OpenRouterActivityRow[] = [];
+  for (const r of results) {
+    if (r.status === "fulfilled") rows.push(...r.value);
+  }
+
+  // Roll up by day (sum across all models/providers for that day).
+  const dayMap = new Map<string, { usage: number; requests: number }>();
+  for (const row of rows) {
+    // OR returns `date` like "2026-04-04 00:00:00" — strip the time.
+    const day = row.date.slice(0, 10);
+    const cur = dayMap.get(day) ?? { usage: 0, requests: 0 };
+    cur.usage += Number(row.usage) || 0;
+    cur.requests += Number(row.requests) || 0;
+    dayMap.set(day, cur);
+  }
+  const by_day = Array.from(dayMap.entries())
+    .map(([date, v]) => ({
+      date,
+      usage: round2(v.usage),
+      requests: v.requests,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Roll up by model (sum across days + providers — the table is
+  // easier to read when google/gemini-2.5-flash is one row, not two).
+  const modelMap = new Map<
+    string,
+    {
+      usage: number;
+      requests: number;
+      prompt_tokens: number;
+      completion_tokens: number;
+    }
+  >();
+  for (const row of rows) {
+    const cur = modelMap.get(row.model) ?? {
+      usage: 0,
+      requests: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+    };
+    cur.usage += Number(row.usage) || 0;
+    cur.requests += Number(row.requests) || 0;
+    cur.prompt_tokens += Number(row.prompt_tokens) || 0;
+    cur.completion_tokens += Number(row.completion_tokens) || 0;
+    modelMap.set(row.model, cur);
+  }
+  const by_model = Array.from(modelMap.entries())
+    .map(([model, v]) => ({
+      model,
+      usage: round2(v.usage),
+      requests: v.requests,
+      prompt_tokens: v.prompt_tokens,
+      completion_tokens: v.completion_tokens,
+    }))
+    .sort((a, b) => b.usage - a.usage);
+
+  const total_usage = round2(
+    rows.reduce((sum, r) => sum + (Number(r.usage) || 0), 0)
+  );
+  const total_requests = rows.reduce(
+    (sum, r) => sum + (Number(r.requests) || 0),
+    0
+  );
+
+  return { rows, by_day, by_model, total_usage, total_requests };
+}

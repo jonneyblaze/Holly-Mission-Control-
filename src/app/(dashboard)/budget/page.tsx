@@ -53,6 +53,22 @@ interface BudgetState {
   combined_mtd_usd?: number;
 }
 
+interface ActivityState {
+  ok: boolean;
+  days: number;
+  by_day: Array<{ date: string; usage: number; requests: number }>;
+  by_model: Array<{
+    model: string;
+    usage: number;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+  }>;
+  total_usage: number;
+  total_requests: number;
+  fetched_at: string;
+}
+
 const TIER_COPY: Record<BudgetTier, { heading: string; detail: string }> = {
   normal: {
     heading: "All systems go",
@@ -78,6 +94,8 @@ const TIER_COPY: Record<BudgetTier, { heading: string; detail: string }> = {
 
 export default function BudgetPage() {
   const [state, setState] = useState<BudgetState | null>(null);
+  const [activity, setActivity] = useState<ActivityState | null>(null);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,11 +114,29 @@ export default function BudgetPage() {
     }
   }, []);
 
+  const loadActivity = useCallback(async () => {
+    try {
+      const res = await fetch("/api/budget/activity?days=7", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      setActivity(json as ActivityState);
+      setActivityError(null);
+    } catch (err) {
+      setActivityError(err instanceof Error ? err.message : "Failed to load activity");
+    }
+  }, []);
+
   useEffect(() => {
     load();
+    loadActivity();
     const t = setInterval(load, 60_000); // refresh every minute
-    return () => clearInterval(t);
-  }, [load]);
+    // Activity is pricier (8 parallel OR fetches) — refresh every 5 min.
+    const a = setInterval(loadActivity, 5 * 60_000);
+    return () => {
+      clearInterval(t);
+      clearInterval(a);
+    };
+  }, [load, loadActivity]);
 
   const runSync = async () => {
     setSyncing(true);
@@ -415,6 +451,109 @@ export default function BudgetPage() {
         </div>
       )}
 
+      {/* OpenRouter org activity — per-model rollup for the last 7
+          completed UTC days. Uses the provisioning key. OR's /activity
+          endpoint doesn't include today, so this trails by ~1 day. */}
+      {(activity || activityError) && (
+        <div className="bg-white rounded-xl border border-border p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-montserrat font-bold text-navy-500">
+                OpenRouter activity — last 7 days
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Org-level spend by model across all keys. Trails today by
+                ~24h (OR only serves completed UTC days).
+              </p>
+            </div>
+            {activity && (
+              <div className="text-right">
+                <div className="text-2xl font-bold text-navy-500">
+                  ${activity.total_usage.toFixed(2)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {activity.total_requests.toLocaleString()} requests
+                </div>
+              </div>
+            )}
+          </div>
+
+          {activityError && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 text-xs mb-3">
+              <AlertTriangle className="inline w-3 h-3 mr-1" />
+              {activityError}
+            </div>
+          )}
+
+          {activity && activity.by_day.length >= 2 && (
+            <div className="mb-4">
+              <DailySparkline points={activity.by_day} />
+            </div>
+          )}
+
+          {activity && activity.by_model.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted-foreground uppercase tracking-wide border-b border-border">
+                    <th className="py-2 pr-3 font-semibold">Model</th>
+                    <th className="py-2 px-3 font-semibold text-right">Spend</th>
+                    <th className="py-2 px-3 font-semibold text-right">Requests</th>
+                    <th className="py-2 px-3 font-semibold text-right">Input tokens</th>
+                    <th className="py-2 px-3 font-semibold text-right">Output tokens</th>
+                    <th className="py-2 pl-3 font-semibold text-right">% of spend</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {activity.by_model.map((m) => {
+                    const pct =
+                      activity.total_usage > 0
+                        ? (m.usage / activity.total_usage) * 100
+                        : 0;
+                    return (
+                      <tr key={m.model}>
+                        <td className="py-2 pr-3 font-mono text-xs text-navy-500">
+                          {m.model}
+                        </td>
+                        <td className="py-2 px-3 text-right font-semibold">
+                          ${m.usage.toFixed(2)}
+                        </td>
+                        <td className="py-2 px-3 text-right text-muted-foreground">
+                          {m.requests.toLocaleString()}
+                        </td>
+                        <td className="py-2 px-3 text-right text-muted-foreground">
+                          {formatTokens(m.prompt_tokens)}
+                        </td>
+                        <td className="py-2 px-3 text-right text-muted-foreground">
+                          {formatTokens(m.completion_tokens)}
+                        </td>
+                        <td className="py-2 pl-3 text-right">
+                          <div className="inline-flex items-center gap-2 justify-end">
+                            <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-teal-500 rounded-full"
+                                style={{ width: `${Math.min(100, pct)}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-muted-foreground w-10 text-right">
+                              {pct.toFixed(1)}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : activity && !activityError ? (
+            <p className="text-sm text-muted-foreground">
+              No activity in the last 7 days.
+            </p>
+          ) : null}
+        </div>
+      )}
+
       {/* Burn curve — lightweight inline SVG, no chart lib */}
       {burnPoints.length >= 2 && current && (
         <div className="bg-white rounded-xl border border-border p-5">
@@ -506,6 +645,45 @@ function BurnSparkline({
       </text>
     </svg>
   );
+}
+
+function DailySparkline({
+  points,
+}: {
+  points: { date: string; usage: number; requests: number }[];
+}) {
+  const w = 800;
+  const h = 80;
+  const pad = 8;
+  const xs = points.map((_, i) => (i / (points.length - 1)) * (w - pad * 2) + pad);
+  const maxY = Math.max(0.01, ...points.map((p) => p.usage));
+  const ys = points.map((p) => h - pad - (p.usage / maxY) * (h - pad * 2));
+  const d = xs.map((x, i) => `${i === 0 ? "M" : "L"}${x},${ys[i]}`).join(" ");
+  const area = `${d} L${xs[xs.length - 1]},${h - pad} L${xs[0]},${h - pad} Z`;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-20">
+      <defs>
+        <linearGradient id="activityFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#0d9488" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="#0d9488" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill="url(#activityFill)" />
+      <path d={d} stroke="#0d9488" strokeWidth="2" fill="none" />
+      {points.map((p, i) => (
+        <g key={p.date}>
+          <circle cx={xs[i]} cy={ys[i]} r="2.5" fill="#0d9488" />
+          <title>{`${p.date}: $${p.usage.toFixed(2)} · ${p.requests.toLocaleString()} req`}</title>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return n.toString();
 }
 
 /** Pulls the sync token from a cookie/localStorage — for manual sync. */
