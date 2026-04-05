@@ -13,7 +13,16 @@ interface HistoryRow {
 }
 
 interface ProviderBreakdown {
-  openrouter: { mtd_usd: number; limit_usd: number };
+  openrouter: {
+    mtd_usd: number;
+    limit_usd: number;
+    account_balance: {
+      total_credits_usd: number;
+      total_usage_usd: number;
+      remaining_usd: number;
+      checked_at: string;
+    } | null;
+  };
   anthropic: {
     mtd_usd: number;
     error: string | null;
@@ -226,6 +235,59 @@ export default function BudgetPage() {
           />
         </div>
       )}
+
+      {/* Account credit balance — account-level, independent of per-key caps */}
+      {state?.providers?.openrouter.account_balance && (() => {
+        const bal = state.providers!.openrouter.account_balance!;
+        const pctRemaining = bal.total_credits_usd > 0
+          ? (bal.remaining_usd / bal.total_credits_usd) * 100
+          : 0;
+        const balColour =
+          bal.remaining_usd < 5
+            ? "border-red-300 bg-red-50"
+            : bal.remaining_usd < 15
+              ? "border-amber-300 bg-amber-50"
+              : "border-emerald-300 bg-emerald-50";
+        const barColour =
+          bal.remaining_usd < 5
+            ? "bg-red-500"
+            : bal.remaining_usd < 15
+              ? "bg-amber-500"
+              : "bg-emerald-500";
+        return (
+          <div className={cn("rounded-xl border p-5", balColour)}>
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h2 className="font-montserrat font-bold text-navy-500">
+                  OpenRouter account balance
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Prepaid credits across the whole org — when this hits $0,
+                  every key stops regardless of its own cap
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-3xl font-bold text-navy-500">
+                  ${bal.remaining_usd.toFixed(2)}
+                </div>
+                <div className="text-xs text-muted-foreground">remaining</div>
+              </div>
+            </div>
+            <div className="h-2 bg-white/60 rounded-full overflow-hidden mb-2">
+              <div
+                className={cn("h-full rounded-full transition-all duration-500", barColour)}
+                style={{ width: `${Math.min(100, Math.max(0, pctRemaining))}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                ${bal.total_usage_usd.toFixed(2)} used of ${bal.total_credits_usd.toFixed(2)} ever added
+              </span>
+              <span>{pctRemaining.toFixed(1)}% remaining</span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Per-provider spend breakdown — OpenRouter + Anthropic direct */}
       {state?.providers && (

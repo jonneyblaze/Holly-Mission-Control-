@@ -80,6 +80,48 @@ export function shouldWriteSnapshot(
   return Date.now() - prevTs > maxAgeMs;
 }
 
+/**
+ * Account-level credit balance on OpenRouter. This is independent of any
+ * individual API key's spend cap — it's the prepaid credits sitting on
+ * the whole org. When `remaining_usd` hits zero, every key stops working
+ * regardless of its own limit.
+ */
+export interface OpenRouterCreditBalance {
+  total_credits_usd: number;
+  total_usage_usd: number;
+  remaining_usd: number;
+  checked_at: string;
+}
+
+/**
+ * Fetch the account-level credit balance. Uses `/api/v1/credits`, which
+ * works with either the runtime key or the provisioning key.
+ */
+export async function fetchOpenRouterCredits(
+  apiKey: string
+): Promise<OpenRouterCreditBalance> {
+  const res = await fetch("https://openrouter.ai/api/v1/credits", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(8000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`OpenRouter /credits failed: HTTP ${res.status}`);
+  }
+
+  const json = await res.json();
+  const d = json.data ?? {};
+  const totalCredits = Number(d.total_credits ?? 0);
+  const totalUsage = Number(d.total_usage ?? 0);
+
+  return {
+    total_credits_usd: round2(totalCredits),
+    total_usage_usd: round2(totalUsage),
+    remaining_usd: round2(Math.max(totalCredits - totalUsage, 0)),
+    checked_at: new Date().toISOString(),
+  };
+}
+
 /** Fetch the live state from OpenRouter — no DB touch. */
 export async function fetchOpenRouterBudget(apiKey: string): Promise<BudgetSnapshotMetadata> {
   const res = await fetch("https://openrouter.ai/api/v1/auth/key", {

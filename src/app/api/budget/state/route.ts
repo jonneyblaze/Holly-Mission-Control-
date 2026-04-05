@@ -8,9 +8,11 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 import {
   fetchOpenRouterBudget,
+  fetchOpenRouterCredits,
   tierColour,
   tierLabel,
   type BudgetSnapshotMetadata,
+  type OpenRouterCreditBalance,
 } from "@/lib/budget";
 import { fetchAnthropicMtdCost } from "@/lib/anthropic-admin";
 
@@ -45,13 +47,18 @@ export async function GET() {
     .order("created_at", { ascending: false })
     .limit(100);
 
-  // Fetch OpenRouter + Anthropic in parallel. The Anthropic admin key
-  // is optional — if it's missing or the call fails we still return the
-  // OR budget data.
+  // Fetch OpenRouter key state + account credit balance + Anthropic in
+  // parallel. The credit balance is an account-level number independent
+  // of any individual key's spend cap — when it hits zero, every key
+  // stops working regardless of its own limit, so it gets surfaced
+  // alongside the per-key state.
   const anthropicAdminKey = process.env.ANTHROPIC_ADMIN_API_KEY;
-  const [orResult, anthropicResult] = await Promise.allSettled([
+  const [orResult, orCreditsResult, anthropicResult] = await Promise.allSettled([
     openRouterKey
       ? fetchOpenRouterBudget(openRouterKey)
+      : Promise.reject(new Error("OPENROUTER_API_KEY not configured")),
+    openRouterKey
+      ? fetchOpenRouterCredits(openRouterKey)
       : Promise.reject(new Error("OPENROUTER_API_KEY not configured")),
     anthropicAdminKey
       ? fetchAnthropicMtdCost(anthropicAdminKey)
@@ -68,6 +75,9 @@ export async function GET() {
         ? orResult.reason.message
         : "OpenRouter fetch failed";
   }
+
+  const orCredits: OpenRouterCreditBalance | null =
+    orCreditsResult.status === "fulfilled" ? orCreditsResult.value : null;
 
   const anthropicMtd =
     anthropicResult.status === "fulfilled" ? anthropicResult.value : null;
@@ -110,6 +120,7 @@ export async function GET() {
       openrouter: {
         mtd_usd: openrouterMtd,
         limit_usd: effective?.limit_usd ?? 0,
+        account_balance: orCredits,
       },
       anthropic: {
         mtd_usd: anthropicMtdUsd,
