@@ -190,49 +190,18 @@ async function checkOllamaViaInfraAgent(): Promise<ProviderStatus | null> {
 }
 
 async function checkOllama(): Promise<ProviderStatus> {
-  const ollamaUrl = process.env.OLLAMA_URL || "http://10.0.1.100:11434";
+  // Ollama lives on Naboo (10.0.1.100) which is unreachable from Vercel,
+  // so we read the latest heartbeat posted by the Naboo cron script to
+  // /api/infra/heartbeat. `checkOllamaViaInfraAgent()` pulls that row from
+  // `agent_activity` and returns a provider snapshot.
+  const fromAgent = await checkOllamaViaInfraAgent();
+  if (fromAgent) return fromAgent;
 
-  try {
-    const res = await fetch(`${ollamaUrl}/api/tags`, {
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      // Direct fetch failed — try infra agent snapshot
-      const fromAgent = await checkOllamaViaInfraAgent();
-      if (fromAgent) return fromAgent;
-
-      return {
-        provider: "Ollama (Local)",
-        status: "error",
-        error: `HTTP ${res.status}`,
-      };
-    }
-
-    const json = await res.json();
-    const models = (json.models || []).map((m: { name: string; size: number; details?: { parameter_size?: string } }) => {
-      const sizeMb = Math.round(m.size / 1e6);
-      const params = m.details?.parameter_size || "";
-      return `${m.name}${params ? ` (${params})` : ``}${sizeMb > 0 ? ` ${(sizeMb / 1000).toFixed(1)}GB` : ``}`;
-    });
-
-    return {
-      provider: "Ollama (Local)",
-      status: "active",
-      usage: 0,
-      models: models.slice(0, 8),
-    };
-  } catch {
-    // Direct fetch failed (LAN-only) — try infra agent snapshot
-    const fromAgent = await checkOllamaViaInfraAgent();
-    if (fromAgent) return fromAgent;
-
-    return {
-      provider: "Ollama (Local)",
-      status: "error",
-      error: "LAN-only — waiting for infra agent report",
-    };
-  }
+  return {
+    provider: "Ollama (Local)",
+    status: "error",
+    error: "Waiting for infra agent heartbeat",
+  };
 }
 
 export async function GET() {
