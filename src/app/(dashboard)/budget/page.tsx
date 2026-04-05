@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { DollarSign, TrendingUp, Gauge, RefreshCw, AlertTriangle, CheckCircle2, Zap } from "lucide-react";
 import MetricCard from "@/components/dashboard/MetricCard";
+import KeysPanel from "@/components/dashboard/KeysPanel";
 import { cn } from "@/lib/utils";
 import type { BudgetSnapshotMetadata, BudgetTier } from "@/lib/budget";
 
@@ -597,6 +598,8 @@ export default function BudgetPage() {
           </div>
         )}
       </div>
+
+      <KeysPanel />
     </div>
   );
 }
