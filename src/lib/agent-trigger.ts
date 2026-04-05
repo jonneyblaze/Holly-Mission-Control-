@@ -65,8 +65,17 @@ export async function fetchAgentFeedback(
 }
 
 /**
- * Build the prompt that gets sent to Holly for a given task.
- * All triggers route through Holly — she orchestrates sub-agent spawning.
+ * Build the prompt sent directly to the assigned agent.
+ *
+ * Pre-2026-04-06: ALL tasks were routed through Holly, who would spawn
+ * the target agent as a sub-agent. This caused the Holly runaway incident
+ * ($6.58 in 20min) — a 30-route QA task was sent to Holly who delegated
+ * to bl-qa as a subagent; the 5min subagent timeout triggered cascade,
+ * and each fallback level carried forward Holly's growing conversation.
+ *
+ * Now: triggers go directly to the assigned agent. The agent itself can
+ * spawn sub-agents via its own tools if it needs to. Holly is just
+ * another agent you explicitly choose, not the default wrapper.
  */
 export async function buildPrompt(
   supabase: SupabaseClient,
@@ -82,18 +91,9 @@ export async function buildPrompt(
 
   const feedbackContext = await fetchAgentFeedback(supabase, agentId);
 
-  const isSubAgent = agentId !== "holly";
-  const delegation = isSubAgent
-    ? `\n\nDELEGATE TO: ${agentId} — Spawn this as a sub-agent using sessions_spawn. Monitor its progress and report back to Mission Control when complete.`
-    : "";
+  return `MISSION CONTROL TASK: ${taskTitle}${desc}${taskRef}${feedbackContext}
 
-  return `MISSION CONTROL TASK: ${taskTitle}${desc}${delegation}${taskRef}${feedbackContext}
-
-${
-  isSubAgent
-    ? `Spawn the ${agentId} sub-agent to handle this task. Monitor it and when the sub-agent finishes, POST the result to Mission Control using the /api/ingest endpoint with activity_type "task_complete". Include a title, summary, and full_content with the results.`
-    : `Complete this task now. When finished, POST your result to Mission Control's /api/ingest endpoint with activity_type "task_complete". Include a title, summary, and full_content with your results.`
-}
+Complete this task now. When finished, POST your result to Mission Control's /api/ingest endpoint with activity_type "task_complete". Include a title, summary, and full_content with your results.
 
 The task will automatically be moved to review in the Kanban board.
 
@@ -108,8 +108,10 @@ export interface TriggerResult {
 
 /**
  * Core trigger logic: queue to agent_activity as a reliable fallback, then
- * attempt a direct OpenClaw call through Holly. Routes ALL tasks through
- * Holly regardless of assigned sub-agent.
+ * attempt a direct OpenClaw call to the assigned agent.
+ *
+ * Previously hardcoded to Holly — now routes directly to the target agent
+ * via `x-openclaw-agent-id` and `model: "openclaw:<agentId>"`.
  */
 export async function triggerAgent(
   supabase: SupabaseClient,
@@ -142,7 +144,6 @@ export async function triggerAgent(
   let directTriggered = false;
   try {
     const controller = new AbortController();
-    // Holly on Gemini 2.5 Pro typically takes 10-15s; 25s gives headroom.
     const timeout = setTimeout(() => controller.abort(), 25000);
 
     const response = await fetch(OPENCLAW_URL, {
@@ -150,14 +151,14 @@ export async function triggerAgent(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${OPENCLAW_TOKEN}`,
-        "x-openclaw-agent-id": "holly",
+        "x-openclaw-agent-id": agentId,
         ...(process.env.CF_ACCESS_CLIENT_ID && {
           "CF-Access-Client-Id": process.env.CF_ACCESS_CLIENT_ID,
           "CF-Access-Client-Secret": process.env.CF_ACCESS_CLIENT_SECRET || "",
         }),
       },
       body: JSON.stringify({
-        model: "openclaw:holly",
+        model: `openclaw:${agentId}`,
         messages: [{ role: "user", content: prompt }],
       }),
       signal: controller.signal,
@@ -180,14 +181,14 @@ export async function triggerAgent(
           .limit(1);
       }
     } else {
-      console.log(`[agent-trigger] Direct call returned ${response.status}, relying on queue`);
+      console.log(`[agent-trigger] Direct call to ${agentId} returned ${response.status}, relying on queue`);
     }
   } catch (err) {
     const isAbort = err instanceof DOMException && err.name === "AbortError";
     if (isAbort) {
-      console.log("[agent-trigger] Direct call timed out — relying on queue as backup");
+      console.log(`[agent-trigger] Direct call to ${agentId} timed out — relying on queue as backup`);
     } else {
-      console.log("[agent-trigger] Direct call failed, relying on queue");
+      console.log(`[agent-trigger] Direct call to ${agentId} failed, relying on queue`);
     }
   }
 
