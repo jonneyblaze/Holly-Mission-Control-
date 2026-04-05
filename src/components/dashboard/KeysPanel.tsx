@@ -28,24 +28,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-/**
- * Known agents. Keep in sync with the openclaw.json `agents.list[].id`
- * on Naboo. Order here drives the row order in the table.
- */
-const KNOWN_AGENTS: { id: string; model_hint: string }[] = [
-  { id: "holly", model_hint: "sonnet-4.6 · orchestrator" },
-  { id: "bl-social", model_hint: "gemini-2.5-flash · drafter" },
-  { id: "bl-community", model_hint: "gemini-2.5-flash · drafter" },
-  { id: "bl-marketing", model_hint: "gemini-2.5-flash · drafter" },
-  { id: "bl-content", model_hint: "gemini-2.5-flash · drafter" },
-  { id: "duracell-prep", model_hint: "haiku-4.5 · fast" },
-  { id: "bl-support", model_hint: "haiku-4.5 · fast" },
-  { id: "bl-qa", model_hint: "sonnet-4.6 · reasoning" },
-  { id: "infra", model_hint: "gemini-2.5-flash · monitoring" },
-  { id: "devops", model_hint: "sonnet-4.6 · deploys" },
-  { id: "private", model_hint: "qwen-local · offline" },
-];
+import { KNOWN_AGENTS } from "@/lib/known-agents";
 
 interface KeyRow {
   id: string;
