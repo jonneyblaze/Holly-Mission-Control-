@@ -24,9 +24,11 @@ export const revalidate = 0;
  *         agent_id,
  *         model,              // primary OR id, back-compat
  *         primary_model,      // primary OR id
- *         fallback_models,    // preference-ordered OR ids, no primary, no ollama
+ *         fallback_models,    // preference-ordered OR ids, no primary, no last-resort
+ *         last_resort_model,  // bare unprefixed last-resort or null (fail-fast tier)
  *         all_models,         // fully-expanded virtual-provider `models[]`
- *                             //   (primary + fallbacks, per-agent labeled)
+ *                             //   (primary + fallbacks, per-agent labeled,
+ *                             //    Anthropic entries carry api+cacheRetention)
  *         api_key,
  *         or_key_hash,
  *         monthly_limit_usd,
@@ -69,13 +71,27 @@ interface VirtualProviderModelEntry {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
   contextWindow: number;
   maxTokens: number;
+  /**
+   * Per-model override of the virtual provider's default `api`. Emitted
+   * only when the ModelSpec defines one — currently set on Anthropic
+   * entries so OpenClaw's `resolveCacheRetention` gate opens and
+   * `extraParams.cacheRetention` is actually honored.
+   */
+  api?: string;
+  /**
+   * Extra model-level params forwarded to the provider. Today we use this
+   * for `cacheRetention: "long"` on Anthropic models — OpenRouter passes
+   * `cache_control` through to Anthropic/Bedrock/Vertex, yielding a 90%
+   * input-cost discount on cache hits.
+   */
+  extraParams?: { cacheRetention?: string };
 }
 
 function buildVirtualProviderModel(
   spec: ModelSpec,
   agentId: string
 ): VirtualProviderModelEntry {
-  return {
+  const entry: VirtualProviderModelEntry = {
     id: spec.id,
     name: `${spec.display_name} (per-agent ${agentId})`,
     reasoning: spec.reasoning,
@@ -84,6 +100,11 @@ function buildVirtualProviderModel(
     contextWindow: spec.contextWindow,
     maxTokens: spec.maxTokens,
   };
+  if (spec.api) entry.api = spec.api;
+  if (spec.cacheRetention) {
+    entry.extraParams = { cacheRetention: spec.cacheRetention };
+  }
+  return entry;
 }
 
 interface ManifestAgent {
@@ -91,6 +112,12 @@ interface ManifestAgent {
   model: string;
   primary_model: string;
   fallback_models: string[];
+  /**
+   * Bare (unprefixed) last-resort model to append after the per-agent-
+   * prefixed fallbacks, or null to fail fast without a last-resort.
+   * Orchestrators send null; fast/drafter tiers send `"ollama/qwen2.5:32b"`.
+   */
+  last_resort_model: string | null;
   all_models: VirtualProviderModelEntry[];
   api_key: string | null;
   or_key_hash: string | null;
@@ -158,6 +185,7 @@ export async function GET(request: NextRequest) {
         model: known.model,
         primary_model: known.model,
         fallback_models: known.fallback_models,
+        last_resort_model: known.last_resort_model,
         all_models: allModels,
         api_key: null,
         or_key_hash: null,
@@ -184,6 +212,7 @@ export async function GET(request: NextRequest) {
       model: known.model,
       primary_model: known.model,
       fallback_models: known.fallback_models,
+      last_resort_model: known.last_resort_model,
       all_models: allModels,
       api_key: apiKey,
       or_key_hash: row.or_key_hash as string,

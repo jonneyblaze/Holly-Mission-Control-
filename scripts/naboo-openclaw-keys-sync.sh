@@ -104,11 +104,20 @@ WITH_KEYS=$(jq '[.agents[] | select(.api_key != null and .disabled == false)] | 
 #      this closes the rogue-agent gap where Gemini-Pro fallbacks used
 #      to leak through the shared openrouter provider.
 #
-#      The last-resort `ollama/qwen2.5:32b` is appended universally —
-#      the manifest deliberately omits it because it's not a per-agent
-#      OR model.
+#      The bare (unprefixed) `last_resort_model` from the manifest is
+#      appended only when non-null — orchestrators (holly/bl-qa/devops)
+#      send null so they fail fast instead of retrying into a runaway
+#      context. Fast/drafter tiers send `ollama/qwen2.5:32b` for a free
+#      local retry.
 #
-#   3. Missing/disabled agents: strip any stale openrouter-<agent>/
+#   3. .agents.defaults.subagents — bump runTimeoutSeconds to 1200 (20
+#      min, up from 5) so long-running subagent tasks like a 30-route
+#      test pass don't trigger cascade on normal runtime. Also delete
+#      any hardcoded `.model` override on subagents so spawned agents
+#      use their own configured per-agent model + virtual provider
+#      instead of inheriting a fleet-wide default that bypasses caps.
+#
+#   4. Missing/disabled agents: strip any stale openrouter-<agent>/
 #      prefix (string OR object form) so they fall back cleanly to the
 #      shared openrouter provider until a key is provisioned for them.
 CANDIDATE=$(mktemp)
@@ -128,6 +137,11 @@ jq --slurpfile mf "$MANIFEST" '
         models: .all_models
       }
     }) | from_entries)
+  | .agents.defaults.subagents.runTimeoutSeconds = 1200
+  | if (.agents.defaults.subagents | has("model"))
+      then .agents.defaults.subagents |= del(.model)
+      else .
+    end
   | .agents.list |= map(
       . as $a
       | ($active | map(select(.agent_id == $a.id)) | first) as $match
@@ -136,7 +150,7 @@ jq --slurpfile mf "$MANIFEST" '
             primary: ("openrouter-" + $match.agent_id + "/" + $match.primary_model),
             fallbacks: (
               ($match.fallback_models | map("openrouter-" + $match.agent_id + "/" + .))
-              + ["ollama/qwen2.5:32b"]
+              + (if $match.last_resort_model then [$match.last_resort_model] else [] end)
             )
           }
         else
