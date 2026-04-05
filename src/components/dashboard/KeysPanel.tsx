@@ -218,8 +218,10 @@ export default function KeysPanel() {
         </button>
       </div>
       <p className="text-xs text-muted-foreground mb-4">
-        One OpenRouter key per agent, with per-agent spend caps enforced by OR. Provisioned here,
-        plumbed into Naboo&apos;s openclaw.json manually.
+        One OpenRouter key per agent with per-agent spend caps enforced by OR &mdash; provisioned
+        &amp; tracked here, <strong>not yet plumbed into Naboo</strong>. Naboo still uses the shared
+        OR key; these keys give you separate OR dashboards, monthly limits, rotation, and kill-switch
+        at the account level. Request-time per-agent isolation is a future step.
       </p>
 
       {error && (
