@@ -63,6 +63,45 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Dedup recurring task findings.
+    // If an agent POSTs a "task" with a title+assigned_agent that already matches
+    // an open task (todo/in_progress/review), we bump the existing task's
+    // updated_at instead of creating a duplicate Kanban card or feed entry.
+    // Agents should use stable canonical titles for recurring findings
+    // (e.g. "QA: New routes discovered — add test coverage").
+    if (activity_type === "task" && title) {
+      const { data: existing } = await supabase
+        .from("tasks")
+        .select("id, status, updated_at")
+        .eq("title", title)
+        .eq("assigned_agent", agent_id)
+        .in("status", ["todo", "in_progress", "review"])
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        const existingTask = existing[0];
+        await supabase
+          .from("tasks")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", existingTask.id);
+
+        console.log(
+          `[ingest] Deduped task for ${agent_id}: "${title}" already exists as ${existingTask.id} (status=${existingTask.status}) — bumped updated_at, no new row created`
+        );
+
+        return NextResponse.json(
+          {
+            ok: true,
+            deduped: true,
+            task_id: existingTask.id,
+            status: existingTask.status,
+            message: "Existing open task found; updated_at bumped, no duplicate created",
+          },
+          { status: 200 }
+        );
+      }
+    }
+
     // Route to specialised table if applicable
     const specialTable = SPECIAL_TYPES[activity_type];
 
