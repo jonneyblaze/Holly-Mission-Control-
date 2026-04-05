@@ -32,6 +32,12 @@ interface ProviderBreakdown {
       total_usd: number;
       by_model: Record<string, number>;
     }>;
+    synthetic_balance: {
+      budget_usd: number;
+      spent_usd: number;
+      remaining_usd: number;
+      source: "self_imposed";
+    } | null;
   };
 }
 
@@ -282,6 +288,65 @@ export default function BudgetPage() {
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
                 ${bal.total_usage_usd.toFixed(2)} used of ${bal.total_credits_usd.toFixed(2)} ever added
+              </span>
+              <span>{pctRemaining.toFixed(1)}% remaining</span>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Anthropic synthetic budget — no real balance endpoint exists on
+          Anthropic's Admin API, so this is a self-imposed monthly ceiling
+          set via ANTHROPIC_MONTHLY_BUDGET_USD env var. */}
+      {state?.providers?.anthropic.synthetic_balance && (() => {
+        const bal = state.providers!.anthropic.synthetic_balance!;
+        const pctRemaining = bal.budget_usd > 0
+          ? (bal.remaining_usd / bal.budget_usd) * 100
+          : 0;
+        const balColour =
+          bal.remaining_usd < bal.budget_usd * 0.1
+            ? "border-red-300 bg-red-50"
+            : bal.remaining_usd < bal.budget_usd * 0.3
+              ? "border-amber-300 bg-amber-50"
+              : "border-emerald-300 bg-emerald-50";
+        const barColour =
+          bal.remaining_usd < bal.budget_usd * 0.1
+            ? "bg-red-500"
+            : bal.remaining_usd < bal.budget_usd * 0.3
+              ? "bg-amber-500"
+              : "bg-emerald-500";
+        return (
+          <div className={cn("rounded-xl border p-5", balColour)}>
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h2 className="font-montserrat font-bold text-navy-500">
+                  Anthropic direct budget
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Self-imposed monthly ceiling — Anthropic&apos;s API doesn&apos;t
+                  expose a credit balance, so this is{" "}
+                  <code className="text-[10px] px-1 py-0.5 bg-white/60 rounded">
+                    ANTHROPIC_MONTHLY_BUDGET_USD
+                  </code>{" "}
+                  minus real cost_report MTD
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-3xl font-bold text-navy-500">
+                  ${bal.remaining_usd.toFixed(2)}
+                </div>
+                <div className="text-xs text-muted-foreground">remaining</div>
+              </div>
+            </div>
+            <div className="h-2 bg-white/60 rounded-full overflow-hidden mb-2">
+              <div
+                className={cn("h-full rounded-full transition-all duration-500", barColour)}
+                style={{ width: `${Math.min(100, Math.max(0, pctRemaining))}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                ${bal.spent_usd.toFixed(2)} used of ${bal.budget_usd.toFixed(2)} budget this month
               </span>
               <span>{pctRemaining.toFixed(1)}% remaining</span>
             </div>

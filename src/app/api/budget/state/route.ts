@@ -88,6 +88,28 @@ export async function GET() {
         : "Anthropic fetch failed"
       : null;
 
+  // Synthetic monthly budget for Anthropic. Anthropic's Admin API does
+  // not expose a credit balance endpoint (confirmed by probing every
+  // plausible /organizations/* path — only cost_report and usage_report
+  // exist), so instead we let the operator set a self-imposed monthly
+  // ceiling via env and compute "remaining = budget - MTD cost". This
+  // gives the dashboard the same visual affordance as the OR balance
+  // card without pretending to read data that doesn't exist.
+  const anthropicBudgetRaw = process.env.ANTHROPIC_MONTHLY_BUDGET_USD;
+  const anthropicBudget = anthropicBudgetRaw ? Number(anthropicBudgetRaw) : null;
+  const anthropicSyntheticBalance =
+    anthropicBudget != null && !Number.isNaN(anthropicBudget)
+      ? {
+          budget_usd: anthropicBudget,
+          spent_usd: anthropicMtd?.total_usd ?? 0,
+          remaining_usd:
+            Math.round(
+              Math.max(anthropicBudget - (anthropicMtd?.total_usd ?? 0), 0) * 100
+            ) / 100,
+          source: "self_imposed" as const,
+        }
+      : null;
+
   const { data: historyRows, error: historyError } = await historyPromise;
   if (historyError) {
     return NextResponse.json({ error: historyError.message }, { status: 500 });
@@ -126,6 +148,7 @@ export async function GET() {
         mtd_usd: anthropicMtdUsd,
         error: anthropicError,
         buckets: anthropicMtd?.buckets ?? [],
+        synthetic_balance: anthropicSyntheticBalance,
       },
     },
     combined_mtd_usd: combinedMtd,
