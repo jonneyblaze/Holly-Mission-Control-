@@ -11,31 +11,50 @@ function getToken() {
   return token;
 }
 
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 2_000;
+
 async function bufferQuery<T = unknown>(
   query: string,
   variables?: Record<string, unknown>
 ): Promise<T> {
-  const res = await fetch(BUFFER_API, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(BUFFER_API, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({ query, variables }),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Buffer API error ${res.status}: ${text}`);
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = res.headers.get("retry-after");
+      const waitMs = retryAfter
+        ? Math.min(parseInt(retryAfter, 10) * 1000, 60_000)
+        : BASE_DELAY_MS * 2 ** attempt;
+      console.log(
+        `[buffer] 429 rate limited, retrying in ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Buffer API error ${res.status}: ${text}`);
+    }
+
+    const json = await res.json();
+
+    if (json.errors && json.errors.length > 0) {
+      throw new Error(`Buffer GraphQL error: ${json.errors[0].message}`);
+    }
+
+    return json.data as T;
   }
 
-  const json = await res.json();
-
-  if (json.errors && json.errors.length > 0) {
-    throw new Error(`Buffer GraphQL error: ${json.errors[0].message}`);
-  }
-
-  return json.data as T;
+  throw new Error("Buffer API: max retries exceeded on 429");
 }
 
 // ---------- Types ----------
@@ -187,15 +206,17 @@ export async function createPostMultiChannel(params: {
   const posts: BufferPost[] = [];
   const errors: string[] = [];
 
-  for (const channelId of params.channelIds) {
+  for (let i = 0; i < params.channelIds.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 1_500));
+
     const result = await createPost({
-      channelId,
+      channelId: params.channelIds[i],
       text: params.text,
       scheduledAt: params.scheduledAt,
     });
 
     if ("error" in result) {
-      errors.push(`${channelId}: ${result.error}`);
+      errors.push(`${params.channelIds[i]}: ${result.error}`);
     } else {
       posts.push(result);
     }
