@@ -167,6 +167,15 @@ async function crawlLinks() {
     "/about", "/features", "/blog", "/privacy-policy", "/terms-of-service",
     "/cookie-policy", "/kb", "/for-individuals", "/business-solutions",
     "/quiz", "/cheat-sheet",
+    // Added 2026-04-06 — public + auth-gated routes discovered by crawler
+    "/for-teams", "/contact", "/community", "/privacy", "/roi-calculator",
+    "/team-dashboard", "/profile", "/my-courses", "/challenges", "/analytics",
+    "/knowledge-base", "/leaderboard", "/bookmarks", "/certificates",
+    "/referrals", "/live-training", "/vip-sessions",
+    // Forum sub-routes (/community/forum itself is 404 — filed as broken)
+    "/community/forum/general-discussion", "/community/forum/body-language-tips",
+    "/community/forum/nlp-techniques", "/community/forum/course-qa",
+    "/community/forum/success-stories", "/community/forum/vip-lounge",
   ];
 
   // Crawl up to 80 pages (avoid infinite loops)
@@ -220,6 +229,8 @@ async function crawlLinks() {
     !EXPECTED_ROUTES.includes(r) &&
     !r.match(/\/courses\/[^/]+/) &&  // dynamic course slugs are OK
     !r.match(/\/blog\/[^/]+/) &&
+    !r.match(/^\/course-learning\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/) && // auth-gated, redirects to last lesson
+    !r.match(/^\/community\/forum\//) && // forum sub-routes with dynamic slugs
     !r.startsWith("/admin") &&
     !r.startsWith("/dashboard")
   );
