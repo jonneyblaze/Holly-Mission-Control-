@@ -160,11 +160,12 @@ export async function createPost(params: {
 }): Promise<BufferPost | { error: string }> {
   const hasSchedule = !!params.scheduledAt;
 
-  // mode: customScheduled requires dueAt, addToQueue lets Buffer pick the time
+  // mode: customScheduled requires dueAt + schedulingType, addToQueue lets Buffer pick
   const input: Record<string, unknown> = {
     channelId: params.channelId,
     text: params.text,
     mode: hasSchedule ? "customScheduled" : "addToQueue",
+    schedulingType: hasSchedule ? "custom" : "smart",
   };
 
   if (hasSchedule) {
