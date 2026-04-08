@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { triggerAgent } from "@/lib/agent-trigger";
 
-// Holly's direct call can take ~15s (Gemini 2.5 Pro via OpenClaw tunnel).
-// Allow up to 30s for the whole function to avoid premature serverless termination.
-export const maxDuration = 30;
+// Agent calls via OpenClaw can take ~20s (model generation + response parsing).
+// Allow up to 60s for the whole function to avoid premature serverless termination.
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");

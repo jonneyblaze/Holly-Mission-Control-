@@ -144,7 +144,7 @@ export async function triggerAgent(
   let directTriggered = false;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    const timeout = setTimeout(() => controller.abort(), 55000);
 
     const response = await fetch(OPENCLAW_URL, {
       method: "POST",
@@ -180,6 +180,16 @@ export async function triggerAgent(
           .order("created_at", { ascending: false })
           .limit(1);
       }
+
+      // Parse the agent's response and extract ingest payloads
+      // The gateway returns tool calls as text — execute them server-side
+      try {
+        const data = await response.json();
+        const content = data?.choices?.[0]?.message?.content || "";
+        await extractAndIngest(supabase, agentId, content);
+      } catch (parseErr) {
+        console.log(`[agent-trigger] Could not parse response for ingest extraction:`, parseErr);
+      }
     } else {
       console.log(`[agent-trigger] Direct call to ${agentId} returned ${response.status}, relying on queue`);
     }
@@ -193,4 +203,67 @@ export async function triggerAgent(
   }
 
   return { queued, directTriggered, prompt };
+}
+
+/**
+ * Extract ingest payloads from the agent's text response and insert them
+ * directly into the appropriate tables. This handles the case where the
+ * OpenClaw gateway returns tool calls as text instead of executing them.
+ */
+async function extractAndIngest(
+  supabase: SupabaseClient,
+  agentId: string,
+  content: string
+): Promise<void> {
+  // Match JSON bodies from web_fetch calls targeting /api/ingest
+  const jsonBlocks = content.match(/\{[^{}]*"activity_type"\s*:\s*"[^"]+?"[^{}]*\}/g);
+  if (!jsonBlocks || jsonBlocks.length === 0) return;
+
+  let ingested = 0;
+  for (const block of jsonBlocks) {
+    try {
+      const payload = JSON.parse(block);
+      const activityType = payload.activity_type;
+      if (!activityType) continue;
+
+      if (activityType === "social_post") {
+        const { error } = await supabase.from("social_posts").insert({
+          platform: payload.metadata?.platform || "linkedin",
+          content: payload.full_content || payload.content || payload.title,
+          status: "draft",
+          agent_id: agentId,
+          scheduled_date: payload.metadata?.scheduled_date || null,
+        });
+        if (!error) ingested++;
+        else console.log(`[agent-trigger] social_post insert failed:`, error.message);
+      } else if (activityType === "task_complete") {
+        // Log task completion to agent_activity
+        await supabase.from("agent_activity").insert({
+          agent_id: agentId,
+          activity_type: "task_complete",
+          title: payload.title || "Task completed",
+          summary: payload.summary || null,
+          full_content: payload.full_content || null,
+          status: "new",
+        });
+      } else {
+        // Generic ingest to agent_activity
+        await supabase.from("agent_activity").insert({
+          agent_id: agentId,
+          activity_type: activityType,
+          title: payload.title || activityType,
+          summary: payload.summary || null,
+          full_content: payload.full_content || null,
+          metadata: payload.metadata || {},
+          status: "new",
+        });
+      }
+    } catch {
+      // Skip unparseable blocks
+    }
+  }
+
+  if (ingested > 0) {
+    console.log(`[agent-trigger] Extracted and ingested ${ingested} items from ${agentId} response`);
+  }
 }
