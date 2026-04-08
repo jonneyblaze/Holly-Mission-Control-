@@ -165,7 +165,7 @@ export async function createPost(params: {
     channelId: params.channelId,
     text: params.text,
     mode: hasSchedule ? "customScheduled" : "addToQueue",
-    schedulingType: hasSchedule ? "custom" : "smart",
+    schedulingType: "automatic",
   };
 
   if (hasSchedule) {
