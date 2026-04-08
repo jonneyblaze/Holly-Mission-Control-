@@ -159,8 +159,11 @@ export default function SocialPage() {
       }
 
       // Schedule to Buffer first, only update status on success
+      // scheduled_time from DB can be "HH:MM" or "HH:MM:SS" — normalise to HH:MM:SS
+      const time = post.scheduled_time || "10:00:00";
+      const normalised = time.length === 5 ? `${time}:00` : time; // "10:00" → "10:00:00"
       const scheduleDate = post.scheduled_date
-        ? new Date(`${post.scheduled_date}T${post.scheduled_time || "10:00"}:00Z`).toISOString()
+        ? new Date(`${post.scheduled_date}T${normalised}Z`).toISOString()
         : undefined;
 
       const res = await fetch("/api/buffer", {
