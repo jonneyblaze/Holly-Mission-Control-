@@ -148,54 +148,49 @@ export default function SocialPage() {
     if (!isLive) { toast.info("Connect Supabase to approve posts"); return; }
 
     try {
-      // Update status in MC
-      await update(post.id, { status: "approved" });
-
       // Find matching Buffer channel
       const channel = bufferChannels.find(
         (c) => c.service.toLowerCase() === post.platform.toLowerCase()
       );
 
-      if (channel) {
-        // Schedule to Buffer
-        try {
-          const scheduleDate = post.scheduled_date
-            ? new Date(`${post.scheduled_date}T${post.scheduled_time || "10:00"}:00Z`).toISOString()
-            : undefined;
-
-          const res = await fetch("/api/buffer", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              channelId: channel.id,
-              text: post.content,
-              scheduledAt: scheduleDate,
-            }),
-          });
-
-          const result = await res.json();
-          if (res.ok) {
-            const bufferId = result.post?.id;
-            await update(post.id, {
-              status: "scheduled",
-              buffer_id: bufferId || null,
-              buffer_profile_id: channel.id,
-            });
-            toast.success(`Approved & scheduled to ${platformConfig[post.platform]?.label || post.platform} via Buffer`);
-          } else {
-            const errMsg = result.error || `HTTP ${res.status}`;
-            toast.error(`Buffer scheduling failed: ${errMsg}`);
-          }
-        } catch {
-          toast.success("Approved — Buffer not reachable, post saved");
-        }
-      } else {
-        toast.success(`Approved — no Buffer channel found for ${post.platform}`);
+      if (!channel) {
+        toast.error(`No Buffer channel found for ${post.platform} — connect it in Buffer first`);
+        return;
       }
 
+      // Schedule to Buffer first, only update status on success
+      const scheduleDate = post.scheduled_date
+        ? new Date(`${post.scheduled_date}T${post.scheduled_time || "10:00"}:00Z`).toISOString()
+        : undefined;
+
+      const res = await fetch("/api/buffer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channelId: channel.id,
+          text: post.content,
+          scheduledAt: scheduleDate,
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        const errMsg = result.error || `HTTP ${res.status}`;
+        toast.error(`Buffer scheduling failed: ${errMsg}`);
+        return;
+      }
+
+      const bufferId = result.post?.id;
+      await update(post.id, {
+        status: "scheduled",
+        buffer_id: bufferId || null,
+        buffer_profile_id: channel.id,
+      });
+      toast.success(`Approved & scheduled to ${platformConfig[post.platform]?.label || post.platform} via Buffer`);
+
       refetch();
-    } catch {
-      toast.error("Failed to approve post");
+    } catch (err) {
+      toast.error(`Failed to schedule: ${err instanceof Error ? err.message : "Buffer not reachable"}`);
     }
   }, [isLive, update, refetch, bufferChannels]);
 

@@ -48,6 +48,16 @@ async function bufferQuery<T = unknown>(
     const json = await res.json();
 
     if (json.errors && json.errors.length > 0) {
+      const code = json.errors[0].extensions?.code;
+      // Retry on GraphQL-level rate limits (HTTP 200 but RATE_LIMIT_EXCEEDED)
+      if (code === "RATE_LIMIT_EXCEEDED" && attempt < MAX_RETRIES) {
+        const waitMs = BASE_DELAY_MS * 2 ** attempt;
+        console.log(
+          `[buffer] GraphQL rate limited, retrying in ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`
+        );
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
       throw new Error(`Buffer GraphQL error: ${json.errors[0].message}`);
     }
 
